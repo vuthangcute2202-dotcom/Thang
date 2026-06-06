@@ -144,8 +144,9 @@ export default function App() {
   const [taskFilters, setTaskFilters] = useState({ startDate: '', endDate: '', empName: 'All', status: 'All' });
   const [newTask, setNewTask] = useState({ id: '', name: '', goal: '', empId: '', empName: '', startDate: '', endDate: '', status: 'Bắt đầu triển khai', priority: 'Trung bình' });
   const [salesPrograms, setSalesPrograms] = useState([]);
+  const [salesPeriodFilter, setSalesPeriodFilter] = useState('All');
   const [newSalesProgram, setNewSalesProgram] = useState({
-    team: '', name: '', goal: '', details: '',
+    team: '', period: 'All', name: '', goal: '', details: '',
     productTargets: {},
     completion: 0, deploymentStatus: 'Chưa triển khai'
   });
@@ -484,17 +485,21 @@ export default function App() {
     return isNaN(num) ? 0 : num;
   };
 
-  const filterByPeriod = (monthLabel) => {
-    if (selectedPeriod === 'All') return true;
-    if (selectedPeriod.startsWith('Quý')) {
+  const matchesPeriod = (monthLabel, period) => {
+    if (period === 'All') return true;
+    if (period.startsWith('Quý')) {
        const mNum = parseInt(monthLabel.replace('Tháng ', ''));
        if (isNaN(mNum)) return false;
-       if (selectedPeriod === 'Quý 1') return mNum >= 1 && mNum <= 3;
-       if (selectedPeriod === 'Quý 2') return mNum >= 4 && mNum <= 6;
-       if (selectedPeriod === 'Quý 3') return mNum >= 7 && mNum <= 9;
-       if (selectedPeriod === 'Quý 4') return mNum >= 10 && mNum <= 12;
+       if (period === 'Quý 1') return mNum >= 1 && mNum <= 3;
+       if (period === 'Quý 2') return mNum >= 4 && mNum <= 6;
+       if (period === 'Quý 3') return mNum >= 7 && mNum <= 9;
+       if (period === 'Quý 4') return mNum >= 10 && mNum <= 12;
     }
-    return monthLabel === selectedPeriod;
+    return monthLabel === period;
+  };
+
+  const filterByPeriod = (monthLabel) => {
+    return matchesPeriod(monthLabel, selectedPeriod);
   };
 
   const handleActualFileChange = async (e) => {
@@ -1073,7 +1078,8 @@ export default function App() {
     const productStats = Object.entries(program.productTargets || {}).map(([product, targets]) => {
       const matchingActuals = rawActuals.filter(item => (
         item.team === program.team &&
-        (item.subProductGroup || item.productGroup) === product
+        (item.subProductGroup || item.productGroup) === product &&
+        matchesPeriod(item.month, program.period || 'All')
       ));
       return {
         product,
@@ -1097,6 +1103,10 @@ export default function App() {
       actualQty: sum('actualQty')
     };
   }), [salesPrograms, rawActuals]);
+
+  const filteredSalesPrograms = useMemo(() => (
+    salesProgramsWithActuals.filter(program => salesPeriodFilter === 'All' || (program.period || 'All') === salesPeriodFilter)
+  ), [salesProgramsWithActuals, salesPeriodFilter]);
 
   const customGroupStats = useMemo(() => {
     return customGroups.map(group => {
@@ -1295,7 +1305,7 @@ export default function App() {
     };
     setSalesPrograms([...salesPrograms, program]);
     setNewSalesProgram({
-      team: '', name: '', goal: '', details: '',
+      team: '', period: 'All', name: '', goal: '', details: '',
       productTargets: {},
       completion: 0, deploymentStatus: 'Chưa triển khai'
     });
@@ -1928,6 +1938,14 @@ Báo cáo được tạo tự động từ hệ thống.`;
 
                   {activeTeamTab === 'sales_programs' && hasAccess('sub_sales') && (
                      <div className="animate-in slide-in-from-bottom-2 duration-300">
+                        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 mb-6 flex flex-wrap items-center gap-3">
+                           <div className="flex items-center gap-2 text-slate-600 font-semibold"><Calendar size={18}/> Lọc chương trình:</div>
+                           <select className="bg-amber-50 border border-amber-200 text-amber-800 font-semibold text-sm rounded-lg p-2.5 outline-none min-w-[210px]" value={salesPeriodFilter} onChange={e=>setSalesPeriodFilter(e.target.value)}>
+                              {periodOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                           </select>
+                           <span className="text-xs text-slate-500">Kết quả thực tế tự tính từ file Excel trong kỳ áp dụng của từng chương trình.</span>
+                        </div>
+
                         {!isViewOnly && hasAccess('action_manage_sales') && (
                            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-6">
                               <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><Plus size={18}/> Thêm chương trình bán hàng</h3>
@@ -1936,7 +1954,10 @@ Báo cáo được tạo tự động từ hệ thống.`;
                                     <option value="">Chọn nhóm phụ trách</option>
                                     {(dynamicTeams.length ? dynamicTeams : fallbackTeams).map(team => <option key={team} value={team}>{team}</option>)}
                                  </select>
-                                 <input required type="text" placeholder="Tên chương trình" className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 lg:col-span-2" value={newSalesProgram.name} onChange={e=>setNewSalesProgram({...newSalesProgram, name: e.target.value})} />
+                                 <select required className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm outline-none" value={newSalesProgram.period} onChange={e=>setNewSalesProgram({...newSalesProgram, period: e.target.value})}>
+                                    {periodOptions.map(option => <option key={option.value} value={option.value}>Kỳ áp dụng: {option.label}</option>)}
+                                 </select>
+                                 <input required type="text" placeholder="Tên chương trình" className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500" value={newSalesProgram.name} onChange={e=>setNewSalesProgram({...newSalesProgram, name: e.target.value})} />
                                  <select className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm outline-none" value={newSalesProgram.deploymentStatus} onChange={e=>setNewSalesProgram({...newSalesProgram, deploymentStatus: e.target.value})}>
                                     <option value="Chưa triển khai">Chưa triển khai</option>
                                     <option value="Đang triển khai">Đang triển khai</option>
@@ -1979,16 +2000,16 @@ Báo cáo được tạo tự động từ hệ thống.`;
                            </div>
                         )}
 
-                        {salesProgramsWithActuals.length === 0 ? (
+                        {filteredSalesPrograms.length === 0 ? (
                            <div className="bg-white p-12 rounded-xl shadow-sm border border-slate-100 text-center flex flex-col items-center">
                               <Megaphone size={48} className="text-slate-300 mb-4"/>
                               <h3 className="text-xl font-bold text-slate-700 mb-2">Chưa có chương trình bán hàng</h3>
-                              <p className="text-slate-500">Thêm chương trình để theo dõi mục tiêu và tiến độ theo từng nhóm.</p>
+                              <p className="text-slate-500">Không có chương trình bán hàng trong kỳ đang chọn.</p>
                            </div>
                         ) : (
                            <div className="flex flex-col gap-6">
-                              {Array.from(new Set(salesProgramsWithActuals.map(program => program.team))).map(team => {
-                                 const programs = salesProgramsWithActuals.filter(program => program.team === team);
+                              {Array.from(new Set(filteredSalesPrograms.map(program => program.team))).map(team => {
+                                 const programs = filteredSalesPrograms.filter(program => program.team === team);
                                  if (appUser?.role !== 'admin' && !isViewOnly) {
                                     const allowed = appUser?.allowedTeams || [];
                                     if (!allowed.includes('All') && !allowed.includes(team)) return null;
@@ -3353,6 +3374,7 @@ function SalesProgramCard({ program, canEdit, onUpdate, onDelete }) {
         <div>
           <h4 className="font-bold text-slate-800 text-lg">{program.name}</h4>
           <p className="text-sm text-indigo-600 font-semibold mt-1">{program.goal}</p>
+          <p className="text-xs text-slate-500 mt-1 flex items-center gap-1"><Calendar size={12}/> Kỳ áp dụng: {program.period === 'All' || !program.period ? 'Toàn năm 2026' : program.period}</p>
         </div>
         <div className="flex items-center gap-2">
           <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${statusStyles[program.deploymentStatus] || statusStyles['Chưa triển khai']}`}>{program.deploymentStatus}</span>
