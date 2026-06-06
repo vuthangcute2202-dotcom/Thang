@@ -57,9 +57,11 @@ npm run build
 5. Mo thu muc repo trong Codex va bat dau thread moi.
 6. Yeu cau Codex doc `PROJECT_HANDOFF.md` truoc khi tiep tuc.
 
-## Remaining Infrastructure
+## Firebase Integration
 
-- Chua cau hinh Firebase production.
-- Khong co Firebase thi du lieu chi ton tai trong phien trinh duyet va khong dong bo giua nguoi dung.
+- Source da ho tro Firebase qua cac bien `VITE_FIREBASE_*` trong `.env`.
+- Da co `.env.example`, `firebase.json` va `firestore.rules`.
+- Can tao/chon Firebase project, bat Anonymous Authentication, tao Firestore va dien `.env`.
+- Khong co `.env` thi du lieu chi ton tai trong phien trinh duyet va khong dong bo giua nguoi dung.
+- Co che tai khoan hien tai luu mat khau trong Firestore, chua phu hop cho du lieu production nhay cam.
 - GitHub CLI tren may hien tai chua dang nhap, nen repository GitHub chua duoc tao/push.
-

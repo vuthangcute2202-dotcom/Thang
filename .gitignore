@@ -3,3 +3,6 @@ dist/
 .vercel/
 *.log
 *.zip
+.env
+.env.local
+.firebase/

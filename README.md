@@ -34,10 +34,22 @@ File `vercel.json` da khai bao san cac gia tri tren.
 1. Build command: `npm run build`.
 2. Publish directory: `dist`.
 
-## Luu y ve du lieu
+## Cau hinh Firebase
 
-Source hien tai tu dong vao quyen Admin local khi khong co Firebase. Du lieu trong
-che do nay khong dong bo giua cac may.
+1. Tao Firebase project va Web App.
+2. Bat `Authentication > Sign-in method > Anonymous`.
+3. Tao Firestore Database.
+4. Sao chep `.env.example` thanh `.env`.
+5. Dien cac gia tri `VITE_FIREBASE_*` tu Firebase Web App config.
+6. Deploy Firestore rules:
 
-De nhieu nguoi dung chung du lieu, can tao Firebase project, bat Anonymous
-Authentication va Firestore, sau do truyen Firebase config vao ung dung.
+```bash
+npx firebase-tools login
+npx firebase-tools use YOUR_FIREBASE_PROJECT_ID
+npx firebase-tools deploy --only firestore:rules
+```
+
+Khi khong co `.env`, ung dung tu dong chay Admin local va khong dong bo du lieu.
+
+Luu y: co che tai khoan ung dung hien tai luu mat khau trong Firestore. Can
+chuyen sang Firebase Authentication truoc khi su dung voi du lieu nhay cam.

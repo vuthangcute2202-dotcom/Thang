@@ -14,22 +14,9 @@ import {
 } from 'lucide-react';
 
 // --- FIREBASE IMPORTS DÀNH CHO LƯU TRỮ ĐÁM MÂY & PHÂN QUYỀN ---
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, collection, getDocs, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
-
-let app, auth, db;
-try {
-  const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
-  if (firebaseConfig) {
-    app = initializeApp(firebaseConfig);
-    auth = getAuth(app);
-    db = getFirestore(app);
-  }
-} catch (error) {
-  console.error("Firebase init error:", error);
-}
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { doc, setDoc, getDoc, collection, getDocs, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { auth, db, dataAppId as appId } from './src/firebase';
 
 const fallbackTeams = ['Nguyễn Huyền My', 'Nguyễn Thị Nhàn', 'Lê Quân'];
 const months = ['Tháng 1', 'Tháng 2', 'Tháng 3', 'Tháng 4', 'Tháng 5', 'Tháng 6', 'Tháng 7', 'Tháng 8', 'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12'];
@@ -251,8 +238,7 @@ export default function App() {
     }
     const initAuth = async () => {
       try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await signInWithCustomToken(auth, __initial_auth_token);
-        else await signInAnonymously(auth);
+        await signInAnonymously(auth);
       } catch(e) { console.error("Auth error", e); }
     };
     initAuth();
