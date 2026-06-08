@@ -61,7 +61,10 @@ npm run build
 
 - Source da ho tro Firebase qua cac bien `VITE_FIREBASE_*` trong `.env`.
 - Da co `.env.example`, `firebase.json` va `firestore.rules`.
-- Can tao/chon Firebase project, bat Anonymous Authentication, tao Firestore va dien `.env`.
+- Firebase project da ket noi: `thang-dashboard-2202`.
+- Web App, Anonymous Authentication va Firestore Database tai `asia-southeast1` da hoat dong.
+- Firestore rules da deploy va da xac minh ghi/doc/xoa bang tai khoan an danh.
+- Cau hinh local nam trong `.env.local` va khong duoc commit.
 - Khong co `.env` thi du lieu chi ton tai trong phien trinh duyet va khong dong bo giua nguoi dung.
 - Co che tai khoan hien tai luu mat khau trong Firestore, chua phu hop cho du lieu production nhay cam.
-- GitHub CLI tren may hien tai chua dang nhap, nen repository GitHub chua duoc tao/push.
+- Repository GitHub: `https://github.com/vuthangcute2202-dotcom/Thang`.
