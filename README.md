@@ -34,6 +34,13 @@ File `vercel.json` da khai bao san cac gia tri tren.
 1. Build command: `npm run build`.
 2. Publish directory: `dist`.
 
+## Deploy Firebase Hosting
+
+```bash
+npm run build
+npx firebase-tools deploy --only hosting
+```
+
 ## Cau hinh Firebase
 
 1. Tao Firebase project va Web App.

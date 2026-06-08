@@ -64,6 +64,7 @@ npm run build
 - Firebase project da ket noi: `thang-dashboard-2202`.
 - Web App, Anonymous Authentication va Firestore Database tai `asia-southeast1` da hoat dong.
 - Firestore rules da deploy va da xac minh ghi/doc/xoa bang tai khoan an danh.
+- Firebase Hosting da deploy: `https://thang-dashboard-2202.web.app`.
 - Cau hinh local nam trong `.env.local` va khong duoc commit.
 - Khong co `.env` thi du lieu chi ton tai trong phien trinh duyet va khong dong bo giua nguoi dung.
 - Co che tai khoan hien tai luu mat khau trong Firestore, chua phu hop cho du lieu production nhay cam.
