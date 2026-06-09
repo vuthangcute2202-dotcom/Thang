@@ -90,6 +90,8 @@ const formatVND = (value) => {
   return value.toLocaleString('vi-VN', { maximumFractionDigits: 2 });
 };
 
+const normalizeSearchText = value => String(value ?? '').trim().toLowerCase();
+
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#d946ef', '#f97316', '#64748b', '#84cc16', '#14b8a6', '#f43f5e', '#6366f1', '#ec4899', '#0ea5e9', '#eab308'];
 const STATUS_COLORS = { 'Bắt đầu triển khai': '#3b82f6', 'Đang chạy': '#f59e0b', 'Đã hoàn thành': '#10b981', 'Hủy': '#64748b' };
 const PRIORITY_COLORS = { 'Cao': '#ef4444', 'Trung bình': '#f59e0b', 'Thấp': '#3b82f6' };
@@ -1423,20 +1425,23 @@ export default function App() {
   }, [rawInventory, invRegionFilter, invBrandFilters, invProductFilters, invSearch]);
 
   const invDetailDynamicBrands = useMemo(() => Array.from(new Set(rawDetailedInventory.map(item => (
-    item.nhomHang || extractBrand(`${item.nhanHang || ''} ${item.tenHang || ''}`)
+    String(item.nhomHang || extractBrand(`${item.nhanHang || ''} ${item.tenHang || ''}`))
   )))).filter(Boolean).sort(), [rawDetailedInventory]);
 
   const detailedInventoryAnalysis = useMemo(() => {
     const groupMap = {};
+    const productQuery = normalizeSearchText(invDetailSearch);
     const ensureGroup = name => {
-      const groupName = name && name !== 'Khác' ? name : 'Khác';
+      const normalizedName = String(name || '').trim();
+      const groupName = normalizedName && normalizedName !== 'Khác' ? normalizedName : 'Khác';
       if (!groupMap[groupName]) groupMap[groupName] = { name: groupName, qty: 0, inventoryValue: 0, revenue: 0, itemCount: 0 };
       return groupMap[groupName];
     };
 
     rawDetailedInventory.forEach(item => {
-      const itemGroup = item.nhomHang || extractBrand(`${item.nhanHang || ''} ${item.tenHang || ''}`);
+      const itemGroup = String(item.nhomHang || extractBrand(`${item.nhanHang || ''} ${item.tenHang || ''}`));
       if (invDetailBrandFilters.length > 0 && !invDetailBrandFilters.includes(itemGroup)) return;
+      if (productQuery && !normalizeSearchText(item.maHang).includes(productQuery) && !normalizeSearchText(item.tenHang).includes(productQuery)) return;
       const group = ensureGroup(itemGroup);
       group.qty += item.cuoiKySL || 0;
       group.inventoryValue += item.cuoiKyGT || 0;
@@ -1447,7 +1452,11 @@ export default function App() {
       .filter(item => matchesPeriod(item.month, invDetailPeriod))
       .forEach(item => {
         const extractedGroup = extractBrand(`${item.subProductGroup || ''} ${item.productGroup || ''}`);
-        const groupName = extractedGroup === 'Khác' ? (item.productGroup || 'Khác') : extractedGroup;
+        const groupName = String(extractedGroup === 'Khác' ? (item.productGroup || 'Khác') : extractedGroup);
+        const matchesProductQuery = !productQuery ||
+          normalizeSearchText(item.productGroup).includes(productQuery) ||
+          normalizeSearchText(item.subProductGroup).includes(productQuery);
+        if (!matchesProductQuery) return;
         if (invDetailBrandFilters.length === 0 || invDetailBrandFilters.includes(groupName)) {
           ensureGroup(groupName).revenue += item.revenueActual || 0;
         }
@@ -1458,10 +1467,6 @@ export default function App() {
         ...group,
         revenueToInventory: group.inventoryValue > 0 ? (group.revenue / group.inventoryValue) * 100 : 0
       }))
-      .filter(group => {
-        if (!invDetailSearch.trim()) return true;
-        return group.name.toLowerCase().includes(invDetailSearch.trim().toLowerCase());
-      })
       .sort((a, b) => b.inventoryValue - a.inventoryValue);
 
     const totalQty = groups.reduce((sum, group) => sum + group.qty, 0);
@@ -1477,15 +1482,12 @@ export default function App() {
   }, [rawDetailedInventory, rawActuals, invDetailPeriod, invDetailSearch, invDetailBrandFilters]);
 
   const filteredDetailedInventoryRows = useMemo(() => rawDetailedInventory.filter(item => {
-    const itemGroup = item.nhomHang || extractBrand(`${item.nhanHang || ''} ${item.tenHang || ''}`);
+    const itemGroup = String(item.nhomHang || extractBrand(`${item.nhanHang || ''} ${item.tenHang || ''}`));
     if (invDetailBrandFilters.length > 0 && !invDetailBrandFilters.includes(itemGroup)) return false;
     if (!invDetailSearch.trim()) return true;
-    const q = invDetailSearch.trim().toLowerCase();
-    return (item.tenKho || '').toLowerCase().includes(q) ||
-      (item.maHang || '').toLowerCase().includes(q) ||
-      (item.tenHang || '').toLowerCase().includes(q) ||
-      itemGroup.toLowerCase().includes(q) ||
-      (item.nhanHang || '').toLowerCase().includes(q);
+    const q = normalizeSearchText(invDetailSearch);
+    return normalizeSearchText(item.maHang).includes(q) ||
+      normalizeSearchText(item.tenHang).includes(q);
   }), [rawDetailedInventory, invDetailBrandFilters, invDetailSearch]);
 
   const filteredTasks = useMemo(() => {
@@ -2889,12 +2891,12 @@ Báo cáo được tạo tự động từ hệ thống.`;
                       <div className="animate-in slide-in-from-bottom-2 duration-300">
                           <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 mb-6 flex flex-wrap items-end gap-4">
                               <div className="flex-1 min-w-[250px] max-w-md">
-                                  <p className="text-xs font-semibold text-slate-500 mb-1">Tìm kiếm nhóm hàng</p>
+                                  <p className="text-xs font-semibold text-slate-500 mb-1">Tìm kiếm mặt hàng</p>
                                   <div className="relative">
                                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                                       <input 
                                           type="text" 
-                                          placeholder="Nhập tên nhóm hàng..."
+                                          placeholder="Nhập mã hoặc tên mặt hàng, ví dụ: bộ nhớ RAM..."
                                           className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2.5 pl-10 pr-4 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500" 
                                           value={invDetailSearch} 
                                           onChange={e => setInvDetailSearch(e.target.value)} 
