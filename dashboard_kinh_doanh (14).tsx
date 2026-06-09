@@ -45,7 +45,7 @@ const TEAM_YEARLY_PLANS = {
 
 const monthWeights = [0.06, 0.06, 0.07, 0.08, 0.08, 0.08, 0.09, 0.09, 0.09, 0.1, 0.1, 0.1];
 
-const KNOWN_BRANDS = ['EDRA', 'UNV', 'GREATWALL', 'FEELTEK', 'ACER', 'FLESPORTS', 'THRONMAX', 'SIHOO', 'HUNTKEY', 'PATRIOT', 'CIDOO', 'SIMORCHIP', 'RAIDMAX', 'ZOTAC', 'NETIS', 'SSTC', 'DAHUA', 'HIKVISION', 'DELL', 'ASUS', 'HP', 'LOGITECH', 'MSI'];
+const KNOWN_BRANDS = ['EDRA', 'UNV', 'UNIARCH', 'GREATWALL', 'FEELTEK', 'THUNDERBIRD', 'ACER', 'FLESPORTS', 'FL', 'THRONMAX', 'SIHOO', 'HUNTKEY', 'PATRIOT', 'CIDOO', 'SIMORCHIP', 'RAIDMAX', 'ZOTAC', 'NETIS', 'SSTC', 'DAHUA', 'HIKVISION', 'DELL', 'ASUS', 'HP', 'LOGITECH', 'MSI'];
 
 const extractBrand = (name) => {
     if (!name) return 'Khác';
@@ -53,6 +53,9 @@ const extractBrand = (name) => {
     
     // Gộp chung các định dạng viết khác nhau của EDRA
     if (upperName.includes('E-DRA') || upperName.includes('EDRA')) return 'EDRA';
+    if (upperName.includes('UNIARCH')) return 'UNIARCH';
+    if (upperName.includes('THUNDERBIRD')) return 'THUNDERBIRD';
+    if (/(?:HIỆU|HIEU)\s*[-:]\s*FL\b/.test(upperName) || /\bFL\b/.test(upperName)) return 'FL';
 
     for (const b of KNOWN_BRANDS) {
         if (upperName.includes(b)) return b;
@@ -98,9 +101,34 @@ export default function App() {
   
   const [chartGranularity, setChartGranularity] = useState('month'); 
   const [financeMetric, setFinanceMetric] = useState('dthuChuaVat'); 
-  const [selectedTeam, setSelectedTeam] = useState('All');
-  const [selectedPeriod, setSelectedPeriod] = useState('All'); 
+  const [reportFilters, setReportFilters] = useState({
+    finance: { teams: [], period: 'All' },
+    teamFinance: { teams: [], period: 'All' },
+    custom: { teams: [], period: 'All' }
+  });
+  const [isTeamFilterOpen, setIsTeamFilterOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+
+  const activeReportFilterKey = activeTab === 'custom'
+    ? 'custom'
+    : activeTab === 'team' && activeTeamTab === 'finance_team'
+      ? 'teamFinance'
+      : 'finance';
+  const selectedTeams = reportFilters[activeReportFilterKey].teams;
+  const selectedPeriod = reportFilters[activeReportFilterKey].period;
+  const setSelectedTeams = (nextTeams) => {
+    setReportFilters(current => {
+      const currentTeams = current[activeReportFilterKey].teams;
+      const teams = typeof nextTeams === 'function' ? nextTeams(currentTeams) : nextTeams;
+      return { ...current, [activeReportFilterKey]: { ...current[activeReportFilterKey], teams } };
+    });
+  };
+  const setSelectedPeriod = (period) => {
+    setReportFilters(current => ({
+      ...current,
+      [activeReportFilterKey]: { ...current[activeReportFilterKey], period }
+    }));
+  };
 
   const [progressPeriodMode, setProgressPeriodMode] = useState('global'); 
 
@@ -116,12 +144,18 @@ export default function App() {
   const [rawInventory, setRawInventory] = useState([]);
   const [invSearch, setInvSearch] = useState('');
   const [invRegionFilter, setInvRegionFilter] = useState('All');
-  const [invBrandFilter, setInvBrandFilter] = useState('All');
+  const [invBrandFilters, setInvBrandFilters] = useState([]);
+  const [invProductFilters, setInvProductFilters] = useState([]);
+  const [isInvBrandFilterOpen, setIsInvBrandFilterOpen] = useState(false);
+  const [isInvProductFilterOpen, setIsInvProductFilterOpen] = useState(false);
   const inventoryFileInputRef = useRef(null);
 
   // Thêm state cho Tồn kho chi tiết mới
   const [rawDetailedInventory, setRawDetailedInventory] = useState([]);
   const [invDetailSearch, setInvDetailSearch] = useState('');
+  const [invDetailPeriod, setInvDetailPeriod] = useState('All');
+  const [invDetailBrandFilters, setInvDetailBrandFilters] = useState([]);
+  const [isInvDetailBrandFilterOpen, setIsInvDetailBrandFilterOpen] = useState(false);
   const detailedInventoryFileInputRef = useRef(null);
 
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
@@ -671,30 +705,55 @@ export default function App() {
         const bstr = evt.target.result;
         const wb = XLSX.read(bstr, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const data = XLSX.utils.sheet_to_json(ws, { defval: "" }); 
+        const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
         const parsedInv = [];
 
-        data.forEach(row => {
-          let khuVuc = '', tenKho = '', maHang = '', tenHang = '', cuoiKy = 0;
-          for (const key in row) {
-              const k = key.toUpperCase();
-              if (k.includes('KHU VỰC')) khuVuc = row[key];
-              else if (k.includes('TÊN KHO') || k.includes('MÃ KHO')) tenKho = row[key];
-              else if (k.includes('MÃ HÀNG')) maHang = row[key];
-              else if (k.includes('TÊN HÀNG')) tenHang = row[key];
-              else if (k.includes('CUỐI KỲ') || k.includes('TỒN KHO') || k.includes('SỐ LƯỢNG TỒN')) cuoiKy = parseNum(row[key]);
+        const normalizeHeader = value => String(value || '').trim().toLowerCase();
+        const headerIdx = data.findIndex(row => row.some(value => normalizeHeader(value).includes('mã hàng')));
+
+        if (headerIdx > -1) {
+          const mainHeaders = data[headerIdx].map(normalizeHeader);
+          const subHeaders = (data[headerIdx + 1] || []).map(normalizeHeader);
+          const hasSubHeaders = subHeaders.some(value => value.includes('số lượng') || value.includes('giá trị'));
+          let currentGroup = '';
+          let cRegion = -1, cWarehouse = -1, cProductCode = -1, cProductName = -1, cEndQty = -1, cEndValue = -1;
+
+          for (let index = 0; index < Math.max(mainHeaders.length, subHeaders.length); index++) {
+            if (mainHeaders[index]) currentGroup = mainHeaders[index];
+            const main = mainHeaders[index] || '';
+            const sub = subHeaders[index] || '';
+            if (main.includes('khu vực')) cRegion = index;
+            else if (main.includes('tên kho') || main.includes('mã kho')) cWarehouse = index;
+            else if (main.includes('mã hàng')) cProductCode = index;
+            else if (main.includes('tên hàng')) cProductName = index;
+
+            const isEndPeriod = currentGroup.includes('cuối kỳ') || currentGroup.includes('tồn kho');
+            if (isEndPeriod && sub.includes('số lượng')) cEndQty = index;
+            if (isEndPeriod && sub.includes('giá trị')) cEndValue = index;
+            if (!hasSubHeaders && (main.includes('số lượng tồn') || main.includes('cuối kỳ'))) cEndQty = index;
+            if (!hasSubHeaders && main.includes('giá trị tồn')) cEndValue = index;
           }
-          if (maHang && tenHang && cuoiKy > 0) { 
+
+          data.slice(headerIdx + (hasSubHeaders ? 2 : 1)).forEach(row => {
+            const maHang = row[cProductCode];
+            const tenHang = row[cProductName];
+            const cuoiKy = parseNum(row[cEndQty]);
+            const giaTriTon = parseNum(row[cEndValue]);
+            const tenKho = row[cWarehouse];
+            const khuVuc = cRegion > -1 ? row[cRegion] : tenKho;
+            if (maHang && tenHang && (cuoiKy > 0 || giaTriTon > 0)) {
               parsedInv.push({
                   region: String(khuVuc || 'Chưa xác định').trim(),
                   warehouse: String(tenKho || 'Chưa xác định').trim(),
                   productCode: String(maHang).trim(),
                   productName: String(tenHang).trim(),
                   brand: extractBrand(tenHang),
-                  qty: cuoiKy
+                  qty: cuoiKy,
+                  inventoryValue: giaTriTon
               });
-          }
-        });
+            }
+          });
+        }
         setRawInventory(parsedInv);
         try {
           await savePersistentDataset('inventory', parsedInv, file.name);
@@ -784,7 +843,8 @@ export default function App() {
                     xuatKhoGT: parseNum(row[cXuatKhoGT]),
                     cuoiKySL: parseNum(row[cCuoiKySL]),
                     cuoiKyGT: parseNum(row[cCuoiKyGT]),
-                    nhanHang: row[cNhanHang] || extractBrand(row[cTenHang])
+                    nhanHang: row[cNhanHang] || extractBrand(row[cTenHang]),
+                    nhomHang: extractBrand(`${row[cNhanHang] || ''} ${row[cTenHang] || ''}`)
                 });
             }
         }
@@ -886,8 +946,20 @@ export default function App() {
     e.target.value = ''; // Tự động reset input sau khi đọc xong
   };
 
-  const filteredPlans = useMemo(() => rawPlans.filter(p => (selectedTeam === 'All' || p.team === selectedTeam) && filterByPeriod(p.month)), [selectedTeam, selectedPeriod, rawPlans]);
-  const filteredActuals = useMemo(() => rawActuals.filter(a => (selectedTeam === 'All' || a.team === selectedTeam) && filterByPeriod(a.month)), [selectedTeam, selectedPeriod, rawActuals]);
+  const matchesSelectedTeams = (team) => selectedTeams.length === 0 || selectedTeams.includes(team);
+  const selectedTeamLabel = selectedTeams.length === 0
+    ? 'Toàn công ty'
+    : selectedTeams.length === 1
+      ? selectedTeams[0]
+      : `${selectedTeams.length} nhóm đã chọn`;
+  const toggleSelectedTeam = (team) => {
+    setSelectedTeams(current => current.includes(team)
+      ? current.filter(item => item !== team)
+      : [...current, team]);
+  };
+
+  const filteredPlans = useMemo(() => rawPlans.filter(p => matchesSelectedTeams(p.team) && filterByPeriod(p.month)), [selectedTeams, selectedPeriod, rawPlans]);
+  const filteredActuals = useMemo(() => rawActuals.filter(a => matchesSelectedTeams(a.team) && filterByPeriod(a.month)), [selectedTeams, selectedPeriod, rawActuals]);
 
   const kpis = useMemo(() => {
     const todayObj = new Date();
@@ -966,7 +1038,7 @@ export default function App() {
 
   const productPlansFiltered = useMemo(() => {
      let base = rawPlans;
-     if (selectedTeam !== 'All') base = base.filter(p => p.team === selectedTeam);
+     if (selectedTeams.length > 0) base = base.filter(p => selectedTeams.includes(p.team));
 
      if (progressPeriodMode === 'global') {
         return base.filter(p => filterByPeriod(p.month));
@@ -979,11 +1051,11 @@ export default function App() {
         return base; 
      }
      return base;
-  }, [rawPlans, selectedTeam, progressPeriodMode, selectedPeriod, currentMonthNum, currentMonthLabel]);
+  }, [rawPlans, selectedTeams, progressPeriodMode, selectedPeriod, currentMonthNum, currentMonthLabel]);
 
   const productActualsFiltered = useMemo(() => {
      let base = rawActuals;
-     if (selectedTeam !== 'All') base = base.filter(a => a.team === selectedTeam);
+     if (selectedTeams.length > 0) base = base.filter(a => selectedTeams.includes(a.team));
 
      if (progressPeriodMode === 'global') {
         return base.filter(a => filterByPeriod(a.month));
@@ -996,7 +1068,7 @@ export default function App() {
         return base; 
      }
      return base;
-  }, [rawActuals, selectedTeam, progressPeriodMode, selectedPeriod, currentMonthNum, currentMonthLabel]);
+  }, [rawActuals, selectedTeams, progressPeriodMode, selectedPeriod, currentMonthNum, currentMonthLabel]);
 
   const productProgress = useMemo(() => {
     const map = {};
@@ -1289,23 +1361,31 @@ export default function App() {
   // XỬ LÝ DỮ LIỆU TỒN KHO
   const invDynamicRegions = useMemo(() => Array.from(new Set(rawInventory.map(i => i.region))).sort(), [rawInventory]);
   const invDynamicBrands = useMemo(() => Array.from(new Set(rawInventory.map(i => i.brand))).sort(), [rawInventory]);
+  const invDynamicProducts = useMemo(() => {
+    const products = new Map();
+    rawInventory.forEach(item => products.set(item.productCode, { code: item.productCode, name: item.productName }));
+    return Array.from(products.values()).sort((a, b) => a.name.localeCompare(b.name, 'vi'));
+  }, [rawInventory]);
 
   const inventoryDataProcessed = useMemo(() => {
       let filtered = rawInventory;
       if (invRegionFilter !== 'All') filtered = filtered.filter(i => i.region === invRegionFilter);
-      if (invBrandFilter !== 'All') filtered = filtered.filter(i => i.brand === invBrandFilter);
+      if (invBrandFilters.length > 0) filtered = filtered.filter(i => invBrandFilters.includes(i.brand));
+      if (invProductFilters.length > 0) filtered = filtered.filter(i => invProductFilters.includes(i.productCode));
       if (invSearch.trim()) {
           const q = invSearch.toLowerCase();
           filtered = filtered.filter(i => i.productCode.toLowerCase().includes(q) || i.productName.toLowerCase().includes(q));
       }
 
       let totalQty = 0;
+      let totalValue = 0;
       const regionMap = {};
       const brandMap = {};
       const productMap = {};
 
       filtered.forEach(item => {
           totalQty += item.qty;
+          totalValue += item.inventoryValue || 0;
           
           if (!regionMap[item.region]) regionMap[item.region] = 0;
           regionMap[item.region] += item.qty;
@@ -1320,10 +1400,12 @@ export default function App() {
                   name: item.productName,
                   brand: item.brand,
                   totalQty: 0,
+                  totalValue: 0,
                   locations: {}
               };
           }
           productMap[pKey].totalQty += item.qty;
+          productMap[pKey].totalValue += item.inventoryValue || 0;
           const locKey = `${item.region} - ${item.warehouse}`;
           if(!productMap[pKey].locations[locKey]) productMap[pKey].locations[locKey] = 0;
           productMap[pKey].locations[locKey] += item.qty;
@@ -1337,8 +1419,62 @@ export default function App() {
           locArray: Object.entries(p.locations).map(([loc, qty]) => ({loc, qty})).sort((a,b) => b.qty - a.qty)
       })).sort((a,b) => b.totalQty - a.totalQty);
 
-      return { totalQty, byRegion, byBrand, products };
-  }, [rawInventory, invRegionFilter, invBrandFilter, invSearch]);
+      return { totalQty, totalValue, byRegion, byBrand, products };
+  }, [rawInventory, invRegionFilter, invBrandFilters, invProductFilters, invSearch]);
+
+  const invDetailDynamicBrands = useMemo(() => Array.from(new Set(rawDetailedInventory.map(item => (
+    item.nhomHang || extractBrand(`${item.nhanHang || ''} ${item.tenHang || ''}`)
+  )))).filter(Boolean).sort(), [rawDetailedInventory]);
+
+  const detailedInventoryAnalysis = useMemo(() => {
+    const groupMap = {};
+    const ensureGroup = name => {
+      const groupName = name && name !== 'Khác' ? name : 'Khác';
+      if (!groupMap[groupName]) groupMap[groupName] = { name: groupName, qty: 0, inventoryValue: 0, revenue: 0, itemCount: 0 };
+      return groupMap[groupName];
+    };
+
+    rawDetailedInventory.forEach(item => {
+      const itemGroup = item.nhomHang || extractBrand(`${item.nhanHang || ''} ${item.tenHang || ''}`);
+      if (invDetailBrandFilters.length > 0 && !invDetailBrandFilters.includes(itemGroup)) return;
+      const group = ensureGroup(itemGroup);
+      group.qty += item.cuoiKySL || 0;
+      group.inventoryValue += item.cuoiKyGT || 0;
+      group.itemCount += 1;
+    });
+
+    rawActuals
+      .filter(item => matchesPeriod(item.month, invDetailPeriod))
+      .forEach(item => {
+        const extractedGroup = extractBrand(`${item.subProductGroup || ''} ${item.productGroup || ''}`);
+        const groupName = extractedGroup === 'Khác' ? (item.productGroup || 'Khác') : extractedGroup;
+        if (invDetailBrandFilters.length === 0 || invDetailBrandFilters.includes(groupName)) {
+          ensureGroup(groupName).revenue += item.revenueActual || 0;
+        }
+      });
+
+    const groups = Object.values(groupMap)
+      .map(group => ({
+        ...group,
+        revenueToInventory: group.inventoryValue > 0 ? (group.revenue / group.inventoryValue) * 100 : 0
+      }))
+      .filter(group => {
+        if (!invDetailSearch.trim()) return true;
+        return group.name.toLowerCase().includes(invDetailSearch.trim().toLowerCase());
+      })
+      .sort((a, b) => b.inventoryValue - a.inventoryValue);
+
+    const totalQty = groups.reduce((sum, group) => sum + group.qty, 0);
+    const totalInventoryValue = groups.reduce((sum, group) => sum + group.inventoryValue, 0);
+    const totalRevenue = groups.reduce((sum, group) => sum + group.revenue, 0);
+    return {
+      groups,
+      totalQty,
+      totalInventoryValue,
+      totalRevenue,
+      revenueToInventory: totalInventoryValue > 0 ? (totalRevenue / totalInventoryValue) * 100 : 0
+    };
+  }, [rawDetailedInventory, rawActuals, invDetailPeriod, invDetailSearch, invDetailBrandFilters]);
 
   const filteredTasks = useMemo(() => {
     return tasks.filter(t => {
@@ -1454,7 +1590,7 @@ export default function App() {
 BÁO CÁO KẾT QUẢ KINH DOANH
 Thời gian xuất: ${new Date().toLocaleString('vi-VN')}
 Kỳ báo cáo: ${periodLabel}
-Nhóm: ${selectedTeam === 'All' ? 'Toàn Công Ty' : selectedTeam}
+Nhóm: ${selectedTeamLabel}
 ========================================
 
 1. TỔNG QUAN TÀI CHÍNH
@@ -1473,7 +1609,7 @@ ${productProgress.map(p => `- ${p.name}: Thực tế ${formatVND(p.actual)} / KH
 
 ========================================
 Báo cáo được tạo tự động từ hệ thống.`;
-  }, [kpis, forecastData, productProgress, periodLabel, selectedTeam, financeMetric]);
+  }, [kpis, forecastData, productProgress, periodLabel, selectedTeamLabel, financeMetric]);
 
   const handleCopyReport = () => {
     try {
@@ -1699,10 +1835,43 @@ Báo cáo được tạo tự động từ hệ thống.`;
                 <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 mb-6 flex flex-wrap gap-4 items-center justify-between">
                   <div className="flex items-center gap-4 flex-wrap w-full">
                     <div className="flex items-center gap-2 text-slate-500 font-medium min-w-fit"><Filter size={18} /> Lọc Báo Cáo:</div>
-                    <select className="bg-blue-50 border border-blue-200 text-blue-800 font-semibold text-sm rounded-lg p-2.5 outline-none min-w-[200px]" value={selectedTeam} onChange={(e) => setSelectedTeam(e.target.value)}>
-                      <option value="All">🏢 Toàn Công Ty (Tất cả Nhóm)</option>
-                      {dynamicTeams.map(t => <option key={t} value={t}>👤 Nhóm: {t}</option>)}
-                    </select>
+                    <div className="relative min-w-[240px]">
+                      <button
+                        type="button"
+                        onClick={() => setIsTeamFilterOpen(open => !open)}
+                        className="w-full bg-blue-50 border border-blue-200 text-blue-800 font-semibold text-sm rounded-lg p-2.5 outline-none flex items-center justify-between gap-3"
+                      >
+                        <span className="truncate">👥 {selectedTeamLabel}</span>
+                        <ChevronDown size={16} className={`shrink-0 transition-transform ${isTeamFilterOpen ? 'rotate-180' : ''}`} />
+                      </button>
+                      {isTeamFilterOpen && (
+                        <div className="absolute left-0 top-full mt-2 z-50 w-full min-w-[280px] max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-xl p-2">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedTeams([])}
+                            className="w-full flex items-center gap-2 p-2.5 rounded-lg text-left text-sm hover:bg-blue-50"
+                          >
+                            {selectedTeams.length === 0 ? <CheckSquare size={17} className="text-blue-600" /> : <Square size={17} className="text-slate-400" />}
+                            <span className="font-semibold text-slate-700">Toàn công ty</span>
+                          </button>
+                          <div className="h-px bg-slate-100 my-1" />
+                          {dynamicTeams.map(team => (
+                            <button
+                              type="button"
+                              key={team}
+                              onClick={() => toggleSelectedTeam(team)}
+                              className="w-full flex items-center gap-2 p-2.5 rounded-lg text-left text-sm hover:bg-blue-50"
+                            >
+                              {selectedTeams.includes(team) ? <CheckSquare size={17} className="text-blue-600" /> : <Square size={17} className="text-slate-400" />}
+                              <span className="text-slate-700">{team}</span>
+                            </button>
+                          ))}
+                          <button type="button" onClick={() => setIsTeamFilterOpen(false)} className="sticky bottom-0 mt-2 w-full bg-blue-600 hover:bg-blue-700 text-white rounded-lg py-2 text-sm font-semibold">
+                            Áp dụng ({selectedTeams.length === 0 ? 'Tất cả' : selectedTeams.length})
+                          </button>
+                        </div>
+                      )}
+                    </div>
                     <select className="bg-amber-50 border border-amber-200 text-amber-800 font-semibold text-sm rounded-lg p-2.5 outline-none min-w-[180px]" value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)}>
                       {periodOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
                     </select>
@@ -1770,7 +1939,7 @@ Báo cáo được tạo tự động từ hệ thống.`;
                            <Target className="text-blue-600" size={20}/> Hoàn thành Mục tiêu từng Mặt hàng
                         </h2>
                         <p className="text-sm text-slate-500 mt-1">
-                           Nhóm: <strong className="text-blue-600">{selectedTeam === 'All' ? 'Toàn công ty' : selectedTeam}</strong> 
+                           Nhóm: <strong className="text-blue-600">{selectedTeamLabel}</strong>
                            <span className="mx-2">|</span> 
                            Mốc đối chiếu: <strong className="text-indigo-600">{growthPeriodLabel}</strong>
                         </p>
@@ -2546,17 +2715,59 @@ Báo cáo được tạo tự động từ hệ thống.`;
                               </div>
                               <div className="w-full md:w-auto">
                                   <p className="text-xs font-semibold text-slate-500 mb-1">Thương hiệu</p>
-                                  <select className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm text-slate-700 outline-none w-full md:w-48" value={invBrandFilter} onChange={e=>setInvBrandFilter(e.target.value)}>
-                                     <option value="All">Tất cả Thương hiệu</option>
-                                     {invDynamicBrands.map(b => <option key={b} value={b}>{b}</option>)}
-                                  </select>
+                                  <div className="relative w-full md:w-56">
+                                    <button type="button" onClick={() => setIsInvBrandFilterOpen(open => !open)} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm text-slate-700 flex items-center justify-between gap-2">
+                                      <span className="truncate">{invBrandFilters.length === 0 ? 'Tất cả Thương hiệu' : `${invBrandFilters.length} thương hiệu đã chọn`}</span>
+                                      <ChevronDown size={16}/>
+                                    </button>
+                                    {isInvBrandFilterOpen && (
+                                      <div className="absolute right-0 top-full mt-2 z-50 w-64 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-xl p-2">
+                                        <button type="button" onClick={() => setInvBrandFilters([])} className="w-full flex items-center gap-2 p-2 rounded-lg text-sm hover:bg-slate-50">
+                                          {invBrandFilters.length === 0 ? <CheckSquare size={16} className="text-blue-600"/> : <Square size={16}/>} Tất cả thương hiệu
+                                        </button>
+                                        {invDynamicBrands.map(brand => (
+                                          <button type="button" key={brand} onClick={() => setInvBrandFilters(current => current.includes(brand) ? current.filter(item => item !== brand) : [...current, brand])} className="w-full flex items-center gap-2 p-2 rounded-lg text-sm hover:bg-slate-50">
+                                            {invBrandFilters.includes(brand) ? <CheckSquare size={16} className="text-blue-600"/> : <Square size={16}/>} {brand}
+                                          </button>
+                                        ))}
+                                        <button type="button" onClick={() => setIsInvBrandFilterOpen(false)} className="sticky bottom-0 mt-2 w-full bg-blue-600 text-white rounded-lg py-2 text-sm font-semibold">Áp dụng</button>
+                                      </div>
+                                    )}
+                                  </div>
+                              </div>
+                              <div className="w-full md:w-auto">
+                                  <p className="text-xs font-semibold text-slate-500 mb-1">Sản phẩm</p>
+                                  <div className="relative w-full md:w-64">
+                                    <button type="button" onClick={() => setIsInvProductFilterOpen(open => !open)} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm text-slate-700 flex items-center justify-between gap-2">
+                                      <span className="truncate">{invProductFilters.length === 0 ? 'Tất cả Sản phẩm' : `${invProductFilters.length} sản phẩm đã chọn`}</span>
+                                      <ChevronDown size={16}/>
+                                    </button>
+                                    {isInvProductFilterOpen && (
+                                      <div className="absolute right-0 top-full mt-2 z-50 w-96 max-w-[90vw] max-h-80 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-xl p-2">
+                                        <button type="button" onClick={() => setInvProductFilters([])} className="w-full flex items-center gap-2 p-2 rounded-lg text-sm hover:bg-slate-50">
+                                          {invProductFilters.length === 0 ? <CheckSquare size={16} className="text-blue-600"/> : <Square size={16}/>} Tất cả sản phẩm
+                                        </button>
+                                        {invDynamicProducts.map(product => (
+                                          <button type="button" key={product.code} onClick={() => setInvProductFilters(current => current.includes(product.code) ? current.filter(item => item !== product.code) : [...current, product.code])} className="w-full flex items-start gap-2 p-2 rounded-lg text-left text-sm hover:bg-slate-50">
+                                            {invProductFilters.includes(product.code) ? <CheckSquare size={16} className="text-blue-600 shrink-0 mt-0.5"/> : <Square size={16} className="shrink-0 mt-0.5"/>}
+                                            <span><strong>{product.code}</strong> - {product.name}</span>
+                                          </button>
+                                        ))}
+                                        <button type="button" onClick={() => setIsInvProductFilterOpen(false)} className="sticky bottom-0 mt-2 w-full bg-blue-600 text-white rounded-lg py-2 text-sm font-semibold">Áp dụng</button>
+                                      </div>
+                                    )}
+                                  </div>
                               </div>
                           </div>
 
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
                              <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100 flex items-center gap-4">
                                 <div className="p-3 bg-blue-50 text-blue-600 rounded-lg"><Package size={24}/></div>
                                 <div><p className="text-sm font-medium text-slate-500">Tổng SL Tồn</p><h3 className="text-2xl font-bold text-slate-800">{inventoryDataProcessed.totalQty.toLocaleString()}</h3></div>
+                             </div>
+                             <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100 flex items-center gap-4">
+                                <div className="p-3 bg-rose-50 text-rose-600 rounded-lg"><DollarSign size={24}/></div>
+                                <div><p className="text-sm font-medium text-slate-500">Tổng Giá trị Tồn</p><h3 className="text-xl font-bold text-slate-800">{formatVND(inventoryDataProcessed.totalValue)}</h3></div>
                              </div>
                              <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100 flex items-center gap-4">
                                 <div className="p-3 bg-emerald-50 text-emerald-600 rounded-lg"><Archive size={24}/></div>
@@ -2615,13 +2826,14 @@ Báo cáo được tạo tự động từ hệ thống.`;
                                   <h3 className="font-bold text-slate-800 flex items-center gap-2"><Briefcase size={18}/> Danh sách Hàng hóa Tồn kho</h3>
                               </div>
                               <div className="overflow-x-auto w-full max-h-[600px] custom-scrollbar relative">
-                                  <table className="w-full text-left border-collapse min-w-[900px]">
+                                  <table className="w-full text-left border-collapse min-w-[1050px]">
                                       <thead className="sticky top-0 bg-slate-50 z-10">
                                           <tr className="text-slate-500 text-[11px] uppercase tracking-wider border-b border-slate-200">
                                               <th className="p-4 font-semibold pl-6 w-[150px]">Mã hàng</th>
                                               <th className="p-4 font-semibold w-[30%]">Tên sản phẩm</th>
                                               <th className="p-4 font-semibold text-center">Thương hiệu</th>
                                               <th className="p-4 font-semibold text-right pr-6 w-[120px]">Tổng tồn</th>
+                                              <th className="p-4 font-semibold text-right pr-6 w-[160px]">Giá trị tồn</th>
                                           </tr>
                                       </thead>
                                       <tbody>
@@ -2645,11 +2857,14 @@ Báo cáo được tạo tự động từ hệ thống.`;
                                                       <td className="p-4 text-right pr-6">
                                                           <span className="text-lg font-black text-slate-800">{p.totalQty.toLocaleString()}</span>
                                                       </td>
+                                                      <td className="p-4 text-right pr-6">
+                                                          <span className="text-sm font-bold text-rose-600">{formatVND(p.totalValue)}</span>
+                                                      </td>
                                                   </tr>
                                               </React.Fragment>
                                           ))}
                                           {inventoryDataProcessed.products.length === 0 && (
-                                              <tr><td colSpan="4" className="p-10 text-center text-slate-500 italic">Không tìm thấy dữ liệu tồn kho nào. Vui lòng thử tìm kiếm khác hoặc tải lên file dữ liệu.</td></tr>
+                                              <tr><td colSpan="5" className="p-10 text-center text-slate-500 italic">Không tìm thấy dữ liệu tồn kho nào. Vui lòng thử tìm kiếm khác hoặc tải lên file dữ liệu.</td></tr>
                                           )}
                                       </tbody>
                                   </table>
@@ -2660,20 +2875,99 @@ Báo cáo được tạo tự động từ hệ thống.`;
 
                   {activeInventoryTab === 'detailed' && (
                       <div className="animate-in slide-in-from-bottom-2 duration-300">
-                          <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 mb-6 flex items-end">
+                          <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 mb-6 flex flex-wrap items-end gap-4">
                               <div className="flex-1 min-w-[250px] max-w-md">
-                                  <p className="text-xs font-semibold text-slate-500 mb-1">Tìm kiếm Tên kho, Mã, Tên hàng</p>
+                                  <p className="text-xs font-semibold text-slate-500 mb-1">Tìm kiếm nhóm hàng</p>
                                   <div className="relative">
                                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                                       <input 
                                           type="text" 
-                                          placeholder="Nhập thông tin cần tìm..." 
+                                          placeholder="Nhập tên nhóm hàng..."
                                           className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2.5 pl-10 pr-4 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500" 
                                           value={invDetailSearch} 
                                           onChange={e => setInvDetailSearch(e.target.value)} 
                                       />
                                   </div>
                               </div>
+                              <div className="w-full md:w-auto">
+                                  <p className="text-xs font-semibold text-slate-500 mb-1">Thời gian doanh thu</p>
+                                  <select className="bg-amber-50 border border-amber-200 rounded-lg p-2.5 text-sm font-semibold text-amber-800 outline-none w-full md:w-52" value={invDetailPeriod} onChange={e => setInvDetailPeriod(e.target.value)}>
+                                    {periodOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                  </select>
+                              </div>
+                              <div className="w-full md:w-auto">
+                                <p className="text-xs font-semibold text-slate-500 mb-1">Thương hiệu</p>
+                                <div className="relative w-full md:w-56">
+                                  <button type="button" onClick={() => setIsInvDetailBrandFilterOpen(open => !open)} className="w-full bg-blue-50 border border-blue-200 rounded-lg p-2.5 text-sm font-semibold text-blue-800 flex items-center justify-between gap-2">
+                                    <span className="truncate">{invDetailBrandFilters.length === 0 ? 'Tất cả thương hiệu' : `${invDetailBrandFilters.length} thương hiệu đã chọn`}</span>
+                                    <ChevronDown size={16}/>
+                                  </button>
+                                  {isInvDetailBrandFilterOpen && (
+                                    <div className="absolute right-0 top-full mt-2 z-50 w-64 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-xl p-2">
+                                      <button type="button" onClick={() => setInvDetailBrandFilters([])} className="w-full flex items-center gap-2 p-2 rounded-lg text-sm hover:bg-blue-50">
+                                        {invDetailBrandFilters.length === 0 ? <CheckSquare size={16} className="text-blue-600"/> : <Square size={16}/>} Tất cả thương hiệu
+                                      </button>
+                                      {invDetailDynamicBrands.map(brand => (
+                                        <button type="button" key={brand} onClick={() => setInvDetailBrandFilters(current => current.includes(brand) ? current.filter(item => item !== brand) : [...current, brand])} className="w-full flex items-center gap-2 p-2 rounded-lg text-sm hover:bg-blue-50">
+                                          {invDetailBrandFilters.includes(brand) ? <CheckSquare size={16} className="text-blue-600"/> : <Square size={16}/>} {brand}
+                                        </button>
+                                      ))}
+                                      <button type="button" onClick={() => setIsInvDetailBrandFilterOpen(false)} className="sticky bottom-0 mt-2 w-full bg-blue-600 text-white rounded-lg py-2 text-sm font-semibold">Áp dụng</button>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+                            <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                              <p className="text-xs font-semibold text-slate-500">Tổng số lượng tồn</p>
+                              <p className="text-2xl font-black text-slate-800 mt-1">{detailedInventoryAnalysis.totalQty.toLocaleString()}</p>
+                            </div>
+                            <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                              <p className="text-xs font-semibold text-slate-500">Tổng giá trị tồn</p>
+                              <p className="text-xl font-black text-emerald-700 mt-1">{formatVND(detailedInventoryAnalysis.totalInventoryValue)}</p>
+                            </div>
+                            <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                              <p className="text-xs font-semibold text-slate-500">Doanh thu chưa VAT</p>
+                              <p className="text-xl font-black text-blue-700 mt-1">{formatVND(detailedInventoryAnalysis.totalRevenue)}</p>
+                            </div>
+                            <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                              <p className="text-xs font-semibold text-slate-500">Tỷ lệ Doanh thu / Tồn kho</p>
+                              <p className="text-2xl font-black text-purple-700 mt-1">{detailedInventoryAnalysis.revenueToInventory.toFixed(1)}%</p>
+                            </div>
+                          </div>
+
+                          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
+                            <div className="p-4 border-b border-slate-200 bg-slate-50">
+                              <h3 className="font-bold text-slate-800">Hiệu quả doanh thu theo nhóm hàng</h3>
+                              <p className="text-xs text-slate-500 mt-1">Doanh thu chưa VAT theo kỳ đã chọn so với giá trị tồn cuối kỳ.</p>
+                            </div>
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-left min-w-[760px]">
+                                <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500">
+                                  <tr>
+                                    <th className="p-3">Nhóm hàng</th>
+                                    <th className="p-3 text-right">Số lượng tồn</th>
+                                    <th className="p-3 text-right">Giá trị tồn</th>
+                                    <th className="p-3 text-right">Doanh thu chưa VAT</th>
+                                    <th className="p-3 text-right">Doanh thu / Tồn</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {detailedInventoryAnalysis.groups.map(group => (
+                                    <tr key={group.name} className="border-t border-slate-100 hover:bg-slate-50/60">
+                                      <td className="p-3 font-bold text-slate-700">{group.name}</td>
+                                      <td className="p-3 text-right font-semibold">{group.qty.toLocaleString()}</td>
+                                      <td className="p-3 text-right font-semibold text-emerald-700">{formatVND(group.inventoryValue)}</td>
+                                      <td className="p-3 text-right font-semibold text-blue-700">{formatVND(group.revenue)}</td>
+                                      <td className="p-3 text-right"><span className="inline-block rounded-lg bg-purple-50 px-2.5 py-1 font-bold text-purple-700">{group.revenueToInventory.toFixed(1)}%</span></td>
+                                    </tr>
+                                  ))}
+                                  {detailedInventoryAnalysis.groups.length === 0 && <tr><td colSpan="5" className="p-8 text-center text-slate-500 italic">Chưa có dữ liệu nhóm hàng phù hợp.</td></tr>}
+                                </tbody>
+                              </table>
+                            </div>
                           </div>
 
                           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
@@ -2711,7 +3005,9 @@ Báo cáo được tạo tự động từ hệ thống.`;
                                                   const q = invDetailSearch.toLowerCase();
                                                   return (item.tenKho || '').toLowerCase().includes(q) || 
                                                          (item.maHang || '').toLowerCase().includes(q) || 
-                                                         (item.tenHang || '').toLowerCase().includes(q);
+                                                         (item.tenHang || '').toLowerCase().includes(q) ||
+                                                         (item.nhomHang || '').toLowerCase().includes(q) ||
+                                                         (item.nhanHang || '').toLowerCase().includes(q);
                                               })
                                               .map((row, idx) => (
                                               <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50 transition-colors text-sm">
