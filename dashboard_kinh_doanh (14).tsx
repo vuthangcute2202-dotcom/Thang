@@ -162,6 +162,8 @@ export default function App() {
   const planFileInputRef = useRef(null);
   const [uploadedActual, setUploadedActual] = useState(null);
   const [uploadedPlan, setUploadedPlan] = useState(null);
+  const [datasetMeta, setDatasetMeta] = useState({});
+  const [datasetNoteDrafts, setDatasetNoteDrafts] = useState({});
 
   // Thêm state Quản trị Tồn kho
   const [rawInventory, setRawInventory] = useState([]);
@@ -583,6 +585,28 @@ export default function App() {
       [`${type}FileName`]: fileName || '',
       [`${type}UpdatedAt`]: new Date().toISOString()
     }, { merge: true });
+    setDatasetMeta(current => ({
+      ...current,
+      [`${type}ChunkCount`]: chunks.length,
+      [`${type}FileName`]: fileName || '',
+      [`${type}UpdatedAt`]: new Date().toISOString()
+    }));
+  };
+
+  const saveDatasetNote = async type => {
+    const note = datasetNoteDrafts[type] ?? datasetMeta[`${type}Note`] ?? '';
+    try {
+      const noteUpdatedAt = new Date().toISOString();
+      await setDoc(persistentDatasetMetaRef(), {
+        [`${type}Note`]: note,
+        [`${type}NoteUpdatedAt`]: noteUpdatedAt
+      }, { merge: true });
+      setDatasetMeta(current => ({ ...current, [`${type}Note`]: note, [`${type}NoteUpdatedAt`]: noteUpdatedAt }));
+      setNotification({ isOpen: true, message: 'Đã lưu ghi chú để mọi người cùng xem.' });
+    } catch (error) {
+      console.error('Lỗi lưu ghi chú dữ liệu:', error);
+      setNotification({ isOpen: true, message: 'Không thể lưu ghi chú. Vui lòng kiểm tra kết nối Firebase.' });
+    }
   };
 
   useEffect(() => {
@@ -592,6 +616,13 @@ export default function App() {
         const metaSnapshot = await getDoc(persistentDatasetMetaRef());
         if (!metaSnapshot.exists()) return;
         const meta = metaSnapshot.data();
+        setDatasetMeta(meta);
+        setDatasetNoteDrafts({
+          actuals: meta.actualsNote || '',
+          plans: meta.plansNote || '',
+          inventory: meta.inventoryNote || '',
+          detailedInventory: meta.detailedInventoryNote || ''
+        });
         const chunksSnapshot = await getDocs(persistentDatasetChunksRef());
         const chunkMap = {};
         chunksSnapshot.forEach(snapshot => {
@@ -1943,6 +1974,13 @@ Báo cáo được tạo tự động từ hệ thống.`;
             )}
 
             {activeTab === 'finance' && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+                <DatasetNotePanel type="actuals" title="Ghi chú dữ liệu Thực tế" meta={datasetMeta} drafts={datasetNoteDrafts} setDrafts={setDatasetNoteDrafts} onSave={saveDatasetNote} canEdit={!isViewOnly && hasAccess('action_upload_finance')} />
+                <DatasetNotePanel type="plans" title="Ghi chú dữ liệu Kế hoạch" meta={datasetMeta} drafts={datasetNoteDrafts} setDrafts={setDatasetNoteDrafts} onSave={saveDatasetNote} canEdit={!isViewOnly && hasAccess('action_upload_finance')} />
+              </div>
+            )}
+
+            {activeTab === 'finance' && (
                <div className="animate-in fade-in duration-300">
                   
                   {/* KPI CARDS */}
@@ -2732,6 +2770,9 @@ Báo cáo được tạo tự động từ hệ thống.`;
 
                   {activeInventoryTab === 'overview' && (
                       <div className="animate-in slide-in-from-bottom-2 duration-300">
+                          <div className="mb-6">
+                            <DatasetNotePanel type="inventory" title="Ghi chú Tồn kho tổng quan" meta={datasetMeta} drafts={datasetNoteDrafts} setDrafts={setDatasetNoteDrafts} onSave={saveDatasetNote} canEdit={!isViewOnly && hasAccess('action_upload_inventory')} />
+                          </div>
                           <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 mb-6 flex flex-wrap gap-4 items-end">
                               <div className="flex-1 min-w-[250px]">
                                   <p className="text-xs font-semibold text-slate-500 mb-1">Tìm kiếm Mã hoặc Tên hàng</p>
@@ -2915,6 +2956,9 @@ Báo cáo được tạo tự động từ hệ thống.`;
 
                   {activeInventoryTab === 'detailed' && (
                       <div className="animate-in slide-in-from-bottom-2 duration-300">
+                          <div className="mb-6">
+                            <DatasetNotePanel type="detailedInventory" title="Ghi chú Tồn kho chi tiết" meta={datasetMeta} drafts={datasetNoteDrafts} setDrafts={setDatasetNoteDrafts} onSave={saveDatasetNote} canEdit={!isViewOnly && hasAccess('action_upload_inventory')} />
+                          </div>
                           <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 mb-6 flex flex-wrap items-end gap-4">
                               <div className="flex-1 min-w-[250px] max-w-md">
                                   <p className="text-xs font-semibold text-slate-500 mb-1">Tìm kiếm mặt hàng</p>
@@ -3789,6 +3833,41 @@ function TeamFinanceCard({ team, isViewOnly }) {
          )}
       </div>
    );
+}
+
+function DatasetNotePanel({ type, title, meta, drafts, setDrafts, onSave, canEdit }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const fileName = meta[`${type}FileName`] || 'Chưa có file được tải lên';
+  const updatedAt = meta[`${type}UpdatedAt`];
+  const note = drafts[type] ?? meta[`${type}Note`] ?? '';
+  const updatedLabel = updatedAt ? new Date(updatedAt).toLocaleString('vi-VN') : 'Chưa có thời gian cập nhật';
+
+  return (
+    <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-4">
+      <div className={`flex flex-col sm:flex-row sm:items-start justify-between gap-3 ${isExpanded ? 'mb-3' : ''}`}>
+        <div>
+          <h3 className="font-bold text-amber-900 flex items-center gap-2"><FileText size={17}/> {title}</h3>
+          <p className="text-xs text-amber-800 mt-1">File: <strong>{fileName}</strong> · Cập nhật: {updatedLabel}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {isExpanded && canEdit && <button type="button" onClick={() => onSave(type)} className="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap">Lưu ghi chú</button>}
+          <button type="button" onClick={() => setIsExpanded(expanded => !expanded)} className="bg-white hover:bg-amber-100 border border-amber-200 text-amber-800 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 whitespace-nowrap">
+            {isExpanded ? <ChevronUp size={14}/> : <ChevronDown size={14}/>} {isExpanded ? 'Ẩn ghi chú' : 'Mở ghi chú'}
+          </button>
+        </div>
+      </div>
+      {isExpanded && (canEdit ? (
+          <textarea
+            value={note}
+            onChange={event => setDrafts(current => ({ ...current, [type]: event.target.value }))}
+            placeholder="Ví dụ: Số liệu tháng 6/2026, đã đối soát đến ngày 09/06..."
+            className="w-full min-h-20 resize-y bg-white border border-amber-200 rounded-lg p-3 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-amber-400/40"
+          />
+        ) : (
+          <p className="text-sm text-slate-700 whitespace-pre-wrap">{note || 'Chưa có ghi chú.'}</p>
+        ))}
+    </div>
+  );
 }
 
 function TaskStatusBadge({ status }) {
