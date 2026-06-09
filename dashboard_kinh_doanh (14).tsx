@@ -325,9 +325,16 @@ export default function App() {
         message: 'Bạn có chắc chắn muốn xóa tài khoản này không? Hành động này không thể hoàn tác.',
         type: 'danger',
         onConfirm: async () => {
-            await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'app_users', id));
-            setAppUsersList(appUsersList.filter(u => u.id !== id));
-            setConfirmAction({ isOpen: false });
+            try {
+                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'app_users', id));
+                setAppUsersList(current => current.filter(u => u.id !== id));
+                if (appUser?.id === id) setAppUser(null);
+                setConfirmAction({ isOpen: false });
+            } catch (error) {
+                console.error('Lỗi xóa tài khoản:', error);
+                setConfirmAction({ isOpen: false });
+                setNotification({ isOpen: true, message: 'Không thể xóa tài khoản. Vui lòng thử lại hoặc kiểm tra kết nối Firebase.' });
+            }
         },
         hideCancel: false,
         confirmText: 'Xác nhận'
@@ -488,6 +495,65 @@ export default function App() {
     return matchesPeriod(monthLabel, selectedPeriod);
   };
 
+  const persistentDatasetMetaRef = () => doc(db, 'artifacts', appId, 'public', 'data', 'persistent_datasets', 'current');
+  const persistentDatasetChunksRef = () => collection(db, 'artifacts', appId, 'public', 'data', 'persistent_datasets', 'current', 'chunks');
+
+  const savePersistentDataset = async (type, rows, fileName) => {
+    if (!user || !db) return;
+    const chunkSize = 200;
+    const chunks = [];
+    for (let index = 0; index < rows.length; index += chunkSize) chunks.push(rows.slice(index, index + chunkSize));
+
+    const existing = await getDocs(persistentDatasetChunksRef());
+    const staleDeletes = [];
+    existing.forEach(snapshot => {
+      if (snapshot.id.startsWith(`${type}_`)) staleDeletes.push(deleteDoc(snapshot.ref));
+    });
+    await Promise.all(staleDeletes);
+
+    await Promise.all(chunks.map((chunk, index) => (
+      setDoc(doc(persistentDatasetChunksRef(), `${type}_${index}`), { rows: chunk })
+    )));
+    await setDoc(persistentDatasetMetaRef(), {
+      [`${type}ChunkCount`]: chunks.length,
+      [`${type}FileName`]: fileName || '',
+      [`${type}UpdatedAt`]: new Date().toISOString()
+    }, { merge: true });
+  };
+
+  useEffect(() => {
+    if (!user || !db || new URLSearchParams(window.location.search).has('reportId')) return;
+    const loadPersistentDatasets = async () => {
+      try {
+        const metaSnapshot = await getDoc(persistentDatasetMetaRef());
+        if (!metaSnapshot.exists()) return;
+        const meta = metaSnapshot.data();
+        const chunksSnapshot = await getDocs(persistentDatasetChunksRef());
+        const chunkMap = {};
+        chunksSnapshot.forEach(snapshot => {
+          chunkMap[snapshot.id] = snapshot.data().rows || [];
+        });
+        const readDataset = type => {
+          const count = Number(meta[`${type}ChunkCount`]) || 0;
+          let rows = [];
+          for (let index = 0; index < count; index++) rows = rows.concat(chunkMap[`${type}_${index}`] || []);
+          return rows;
+        };
+
+        if (meta.actualsChunkCount !== undefined) setRawActuals(readDataset('actuals'));
+        if (meta.plansChunkCount !== undefined) setRawPlans(readDataset('plans'));
+        if (meta.inventoryChunkCount !== undefined) setRawInventory(readDataset('inventory'));
+        if (meta.detailedInventoryChunkCount !== undefined) setRawDetailedInventory(readDataset('detailedInventory'));
+        if (meta.actualsFileName) setUploadedActual(meta.actualsFileName);
+        if (meta.plansFileName) setUploadedPlan(meta.plansFileName);
+      } catch (error) {
+        console.error('Lỗi tải dữ liệu đã lưu:', error);
+        setNotification({ isOpen: true, message: 'Không thể tải dữ liệu đã lưu từ Firebase.' });
+      }
+    };
+    loadPersistentDatasets();
+  }, [user, db]);
+
   const handleActualFileChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -497,7 +563,7 @@ export default function App() {
     try {
       const XLSX = await loadSheetJS();
       const reader = new FileReader();
-      reader.onload = (evt) => {
+      reader.onload = async (evt) => {
         const bstr = evt.target.result;
         const wb = XLSX.read(bstr, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
@@ -572,6 +638,12 @@ export default function App() {
           });
         });
         setRawActuals(parsedActuals);
+        try {
+          await savePersistentDataset('actuals', parsedActuals, file.name);
+        } catch (error) {
+          console.error('Lỗi lưu dữ liệu thực tế:', error);
+          setNotification({ isOpen: true, message: 'Đã đọc file nhưng không thể lưu dữ liệu thực tế lên Firebase.' });
+        }
         setIsProcessing(false);
       };
       reader.readAsBinaryString(file);
@@ -588,7 +660,7 @@ export default function App() {
     try {
       const XLSX = await loadSheetJS();
       const reader = new FileReader();
-      reader.onload = (evt) => {
+      reader.onload = async (evt) => {
         const bstr = evt.target.result;
         const wb = XLSX.read(bstr, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
@@ -617,6 +689,12 @@ export default function App() {
           }
         });
         setRawInventory(parsedInv);
+        try {
+          await savePersistentDataset('inventory', parsedInv, file.name);
+        } catch (error) {
+          console.error('Lỗi lưu dữ liệu tồn kho:', error);
+          setNotification({ isOpen: true, message: 'Đã đọc file nhưng không thể lưu dữ liệu tồn kho lên Firebase.' });
+        }
         setIsProcessing(false);
       };
       reader.readAsBinaryString(file);
@@ -633,7 +711,7 @@ export default function App() {
     try {
       const XLSX = await loadSheetJS();
       const reader = new FileReader();
-      reader.onload = (evt) => {
+      reader.onload = async (evt) => {
         const bstr = evt.target.result;
         const wb = XLSX.read(bstr, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
@@ -704,6 +782,12 @@ export default function App() {
             }
         }
         setRawDetailedInventory(parsedInv);
+        try {
+          await savePersistentDataset('detailedInventory', parsedInv, file.name);
+        } catch (error) {
+          console.error('Lỗi lưu dữ liệu tồn kho chi tiết:', error);
+          setNotification({ isOpen: true, message: 'Đã đọc file nhưng không thể lưu dữ liệu tồn kho chi tiết lên Firebase.' });
+        }
         setIsProcessing(false);
       };
       reader.readAsBinaryString(file);
@@ -721,7 +805,7 @@ export default function App() {
     try {
       const XLSX = await loadSheetJS();
       const reader = new FileReader();
-      reader.onload = (evt) => {
+      reader.onload = async (evt) => {
         const bstr = evt.target.result;
         const wb = XLSX.read(bstr, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
@@ -778,7 +862,15 @@ export default function App() {
             });
           }
         }
-        if (parsedPlans.length > 0) setRawPlans(parsedPlans);
+        if (parsedPlans.length > 0) {
+          setRawPlans(parsedPlans);
+          try {
+            await savePersistentDataset('plans', parsedPlans, file.name);
+          } catch (error) {
+            console.error('Lỗi lưu dữ liệu kế hoạch:', error);
+            setNotification({ isOpen: true, message: 'Đã đọc file nhưng không thể lưu dữ liệu kế hoạch lên Firebase.' });
+          }
+        }
         setIsProcessing(false);
       };
       reader.readAsBinaryString(file);
@@ -2699,7 +2791,7 @@ Báo cáo được tạo tự động từ hệ thống.`;
                                        </td>
                                        <td className="p-4 text-right pr-6">
                                            <button onClick={() => { setEditingAppUser(u); setAdminModalError(''); setIsAppUserModalOpen(true); }} className="text-slate-400 hover:text-indigo-600 p-2 rounded transition-colors" title="Sửa"><Edit size={16} /></button>
-                                           <button onClick={() => handleDeleteAppUser(u.id)} disabled={appUser.id === u.id} className="text-slate-400 hover:text-rose-600 p-2 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed" title="Xóa"><Trash2 size={16} /></button>
+                                           <button onClick={() => handleDeleteAppUser(u.id)} className="text-slate-400 hover:text-rose-600 p-2 rounded transition-colors" title="Xóa"><Trash2 size={16} /></button>
                                        </td>
                                    </tr>
                                ))}
