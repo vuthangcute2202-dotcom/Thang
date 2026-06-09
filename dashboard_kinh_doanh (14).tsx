@@ -252,7 +252,7 @@ export default function App() {
         try {
             const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'app_users'));
             const users = [];
-            snap.forEach(doc => users.push({ id: doc.id, ...doc.data() }));
+            snap.forEach(doc => users.push({ ...doc.data(), id: doc.id }));
             setAppUsersList(users);
         } catch(e) { console.error("Lỗi tải users", e); }
         setIsLoadingAppUsers(false);
@@ -310,12 +310,13 @@ export default function App() {
     }
     setAdminModalError('');
     try {
+        const { id, ...userData } = editingAppUser;
         if (editingAppUser.id) {
-            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'app_users', editingAppUser.id), editingAppUser);
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'app_users', editingAppUser.id), userData);
             setAppUsersList(appUsersList.map(u => u.id === editingAppUser.id ? editingAppUser : u));
         } else {
-            const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'app_users'), editingAppUser);
-            setAppUsersList([...appUsersList, { id: docRef.id, ...editingAppUser }]);
+            const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'app_users'), userData);
+            setAppUsersList([...appUsersList, { ...userData, id: docRef.id }]);
         }
         setIsAppUserModalOpen(false);
     } catch(e) { 
@@ -324,22 +325,18 @@ export default function App() {
   };
 
   const handleDeleteAppUser = (account) => {
-    const duplicateAccounts = appUsersList.filter(u => u.username?.trim().toLowerCase() === account.username?.trim().toLowerCase());
     setConfirmAction({
         isOpen: true,
         title: 'Xóa Tài Khoản',
-        message: duplicateAccounts.length > 1
-          ? `Tài khoản "${account.username}" đang có ${duplicateAccounts.length} bản ghi trùng. Hệ thống sẽ xóa toàn bộ các bản ghi này.`
-          : `Bạn có chắc chắn muốn xóa tài khoản "${account.username}" không? Hành động này không thể hoàn tác.`,
+        message: `Bạn có chắc chắn muốn xóa đúng tài khoản "${account.username}" đang chọn không? Hành động này không thể hoàn tác.`,
         type: 'danger',
         onConfirm: async () => {
             try {
-                await Promise.all(duplicateAccounts.map(item => deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'app_users', item.id))));
-                const deletedIds = new Set(duplicateAccounts.map(item => item.id));
-                setAppUsersList(current => current.filter(u => !deletedIds.has(u.id)));
-                if (deletedIds.has(appUser?.id)) setAppUser(null);
+                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'app_users', account.id));
+                setAppUsersList(current => current.filter(u => u.id !== account.id));
+                if (appUser?.id === account.id) setAppUser(null);
                 setConfirmAction({ isOpen: false });
-                setNotification({ isOpen: true, message: `Đã xóa tài khoản "${account.username}"${duplicateAccounts.length > 1 ? ` và ${duplicateAccounts.length - 1} bản ghi trùng` : ''}.` });
+                setNotification({ isOpen: true, message: `Đã xóa đúng tài khoản "${account.username}" được chọn.` });
             } catch (error) {
                 console.error('Lỗi xóa tài khoản:', error);
                 setConfirmAction({ isOpen: false });
@@ -1564,6 +1561,17 @@ Báo cáo được tạo tự động từ hệ thống.`;
                    {confirmAction.confirmText || 'Xác nhận'}
                 </button>
              </div>
+          </div>
+        </div>
+      )}
+      {notification.isOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 text-center">
+            <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-4">
+              <CheckCircle2 size={24}/>
+            </div>
+            <p className="text-sm text-slate-700">{notification.message}</p>
+            <button onClick={() => setNotification({ isOpen: false, message: '' })} className="mt-5 px-5 py-2 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700">Đóng</button>
           </div>
         </div>
       )}
