@@ -92,6 +92,27 @@ const formatVND = (value) => {
 
 const normalizeSearchText = value => String(value ?? '').trim().toLowerCase();
 
+const classifyProductGroup = value => {
+  const text = normalizeSearchText(value);
+  const rules = [
+    ['Bàn phím', ['bàn phím', 'ban phim', 'keyboard', 'bộ kit bàn phím']],
+    ['Chuột', ['chuột', 'chuot', 'mouse']],
+    ['Tai nghe', ['tai nghe', 'headset', 'headphone']],
+    ['Màn hình', ['màn hình', 'man hinh', 'monitor']],
+    ['Bộ nhớ RAM', ['bộ nhớ ram', 'bo nho ram', 'ram ', 'memory']],
+    ['Bo mạch chủ', ['bo mạch chủ', 'bo mach chu', 'mainboard', 'motherboard']],
+    ['Nguồn', ['bộ nguồn', 'bo nguon', 'nguồn máy tính', 'power supply', 'psu']],
+    ['Case', ['vỏ máy tính', 'vo may tinh', 'case máy tính', 'computer case']],
+    ['Ghế', ['ghế', 'ghe ', 'chair']],
+    ['Bàn Gaming', ['bàn gaming', 'ban gaming', 'gaming desk']],
+    ['AIO', ['aio', 'all in one']],
+    ['UNV', ['unv', 'uniarch']],
+    ['Phụ Kiện', ['phụ kiện', 'phu kien', 'dây cáp', 'day cap', 'kê tay', 'ke tay', 'bút nước', 'but nuoc', 'adapter', 'hub']]
+  ];
+  const match = rules.find(([, keywords]) => keywords.some(keyword => text.includes(keyword)));
+  return match ? match[0] : String(value || 'Khác').trim() || 'Khác';
+};
+
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#d946ef', '#f97316', '#64748b', '#84cc16', '#14b8a6', '#f43f5e', '#6366f1', '#ec4899', '#0ea5e9', '#eab308'];
 const STATUS_COLORS = { 'Bắt đầu triển khai': '#3b82f6', 'Đang chạy': '#f59e0b', 'Đã hoàn thành': '#10b981', 'Hủy': '#64748b' };
 const PRIORITY_COLORS = { 'Cao': '#ef4444', 'Trung bình': '#f59e0b', 'Thấp': '#3b82f6' };
@@ -1442,25 +1463,30 @@ export default function App() {
       const itemGroup = String(item.nhomHang || extractBrand(`${item.nhanHang || ''} ${item.tenHang || ''}`));
       if (invDetailBrandFilters.length > 0 && !invDetailBrandFilters.includes(itemGroup)) return;
       if (productQuery && !normalizeSearchText(item.maHang).includes(productQuery) && !normalizeSearchText(item.tenHang).includes(productQuery)) return;
-      const group = ensureGroup(itemGroup);
+      const group = ensureGroup(invDetailBrandFilters.length > 0 ? itemGroup : classifyProductGroup(item.tenHang));
       group.qty += item.cuoiKySL || 0;
       group.inventoryValue += item.cuoiKyGT || 0;
       group.itemCount += 1;
     });
 
+    const revenueByProductGroup = {};
     rawActuals
       .filter(item => matchesPeriod(item.month, invDetailPeriod))
       .forEach(item => {
-        const extractedGroup = extractBrand(`${item.subProductGroup || ''} ${item.productGroup || ''}`);
-        const groupName = String(extractedGroup === 'Khác' ? (item.productGroup || 'Khác') : extractedGroup);
-        const matchesProductQuery = !productQuery ||
-          normalizeSearchText(item.productGroup).includes(productQuery) ||
-          normalizeSearchText(item.subProductGroup).includes(productQuery);
-        if (!matchesProductQuery) return;
-        if (invDetailBrandFilters.length === 0 || invDetailBrandFilters.includes(groupName)) {
-          ensureGroup(groupName).revenue += item.revenueActual || 0;
-        }
+        const rawGroup = String(item.subProductGroup || item.productGroup || 'Khác');
+        const extractedBrand = extractBrand(rawGroup);
+        const groupName = invDetailBrandFilters.length > 0
+          ? (extractedBrand === 'Khác' ? rawGroup : extractedBrand)
+          : classifyProductGroup(rawGroup);
+        if (invDetailBrandFilters.length > 0 && !invDetailBrandFilters.includes(groupName)) return;
+        revenueByProductGroup[groupName] = (revenueByProductGroup[groupName] || 0) + (item.revenueActual || 0);
       });
+    Object.entries(revenueByProductGroup).forEach(([groupName, revenue]) => {
+      ensureGroup(groupName).revenue = revenue;
+    });
+    Object.values(groupMap).forEach(group => {
+      if (revenueByProductGroup[group.name] !== undefined) group.revenue = revenueByProductGroup[group.name];
+    });
 
     const groups = Object.values(groupMap)
       .map(group => ({
@@ -2956,6 +2982,7 @@ Báo cáo được tạo tự động từ hệ thống.`;
                             <div className="p-4 border-b border-slate-200 bg-slate-50">
                               <h3 className="font-bold text-slate-800">Hiệu quả doanh thu theo nhóm hàng</h3>
                               <p className="text-xs text-slate-500 mt-1">Doanh thu chưa VAT theo kỳ đã chọn so với giá trị tồn cuối kỳ.</p>
+                              {invDetailSearch.trim() && <p className="text-xs text-amber-700 mt-1 font-medium">Tìm kiếm mặt hàng lọc tồn kho theo tên/mã; doanh thu vẫn lấy theo toàn bộ nhóm hàng hoặc thương hiệu tương ứng vì file doanh thu không có tên hàng chi tiết.</p>}
                             </div>
                             <div className="overflow-x-auto">
                               <table className="w-full text-left min-w-[760px]">
