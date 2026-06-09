@@ -1476,6 +1476,18 @@ export default function App() {
     };
   }, [rawDetailedInventory, rawActuals, invDetailPeriod, invDetailSearch, invDetailBrandFilters]);
 
+  const filteredDetailedInventoryRows = useMemo(() => rawDetailedInventory.filter(item => {
+    const itemGroup = item.nhomHang || extractBrand(`${item.nhanHang || ''} ${item.tenHang || ''}`);
+    if (invDetailBrandFilters.length > 0 && !invDetailBrandFilters.includes(itemGroup)) return false;
+    if (!invDetailSearch.trim()) return true;
+    const q = invDetailSearch.trim().toLowerCase();
+    return (item.tenKho || '').toLowerCase().includes(q) ||
+      (item.maHang || '').toLowerCase().includes(q) ||
+      (item.tenHang || '').toLowerCase().includes(q) ||
+      itemGroup.toLowerCase().includes(q) ||
+      (item.nhanHang || '').toLowerCase().includes(q);
+  }), [rawDetailedInventory, invDetailBrandFilters, invDetailSearch]);
+
   const filteredTasks = useMemo(() => {
     return tasks.filter(t => {
       const matchStartDate = !taskFilters.startDate || t.startDate >= taskFilters.startDate;
@@ -2970,10 +2982,32 @@ Báo cáo được tạo tự động từ hệ thống.`;
                             </div>
                           </div>
 
+                          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 mb-6">
+                            <div className="mb-4">
+                              <h3 className="font-bold text-slate-800">Doanh thu và giá trị tồn theo nhóm hàng</h3>
+                              <p className="text-xs text-slate-500 mt-1">So sánh trực quan theo bộ lọc thương hiệu và thời gian đang chọn.</p>
+                            </div>
+                            <div className="h-[300px]">
+                              {detailedInventoryAnalysis.groups.length > 0 ? (
+                                <ResponsiveContainer width="100%" height="100%">
+                                  <BarChart data={detailedInventoryAnalysis.groups.slice(0, 12)} margin={{ top: 10, right: 10, left: 10, bottom: 25 }}>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0"/>
+                                    <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-15} textAnchor="end" height={55}/>
+                                    <YAxis tick={{ fontSize: 10 }} tickFormatter={value => value >= 1000000000 ? `${(value / 1000000000).toFixed(1)} tỷ` : `${Math.round(value / 1000000)} tr`}/>
+                                    <Tooltip formatter={(value, name) => [formatVND(value), name === 'inventoryValue' ? 'Giá trị tồn' : 'Doanh thu chưa VAT']}/>
+                                    <Legend formatter={value => value === 'inventoryValue' ? 'Giá trị tồn' : 'Doanh thu chưa VAT'}/>
+                                    <Bar dataKey="inventoryValue" fill="#10b981" radius={[4, 4, 0, 0]}/>
+                                    <Bar dataKey="revenue" fill="#3b82f6" radius={[4, 4, 0, 0]}/>
+                                  </BarChart>
+                                </ResponsiveContainer>
+                              ) : <div className="h-full flex items-center justify-center text-slate-400 italic">Chưa có dữ liệu phù hợp.</div>}
+                            </div>
+                          </div>
+
                           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
                               <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
                                   <h3 className="font-bold text-slate-800 flex items-center gap-2"><Archive size={18} className="text-emerald-600"/> Báo cáo Tổng tồn kho chi tiết</h3>
-                                  <span className="text-xs bg-emerald-100 text-emerald-800 font-bold px-3 py-1 rounded-full">{rawDetailedInventory.length} mã hàng</span>
+                                  <span className="text-xs bg-emerald-100 text-emerald-800 font-bold px-3 py-1 rounded-full">{filteredDetailedInventoryRows.length} mã hàng</span>
                               </div>
                               <div className="overflow-x-auto w-full max-h-[650px] custom-scrollbar relative">
                                   <table className="w-full text-left border-collapse min-w-[1400px]">
@@ -2999,17 +3033,7 @@ Báo cáo được tạo tự động từ hệ thống.`;
                                           </tr>
                                       </thead>
                                       <tbody>
-                                          {rawDetailedInventory
-                                              .filter(item => {
-                                                  if (!invDetailSearch) return true;
-                                                  const q = invDetailSearch.toLowerCase();
-                                                  return (item.tenKho || '').toLowerCase().includes(q) || 
-                                                         (item.maHang || '').toLowerCase().includes(q) || 
-                                                         (item.tenHang || '').toLowerCase().includes(q) ||
-                                                         (item.nhomHang || '').toLowerCase().includes(q) ||
-                                                         (item.nhanHang || '').toLowerCase().includes(q);
-                                              })
-                                              .map((row, idx) => (
+                                          {filteredDetailedInventoryRows.map((row, idx) => (
                                               <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50 transition-colors text-sm">
                                                   <td className="p-3 border-r border-slate-100 text-xs text-slate-600">{row.tenKho}</td>
                                                   <td className="p-3 border-r border-slate-100 text-xs text-slate-500 font-mono text-center">{row.maKho}</td>
@@ -3032,7 +3056,7 @@ Báo cáo được tạo tự động từ hệ thống.`;
                                                   <td className="p-3 text-center"><span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-1 rounded font-bold whitespace-nowrap">{row.nhanHang}</span></td>
                                               </tr>
                                           ))}
-                                          {rawDetailedInventory.length === 0 && (
+                                          {filteredDetailedInventoryRows.length === 0 && (
                                               <tr><td colSpan="12" className="p-10 text-center text-slate-500 italic">Không có dữ liệu. Vui lòng tải lên file "Tổng tồn kho chi tiết" để xem báo cáo này.</td></tr>
                                           )}
                                       </tbody>
