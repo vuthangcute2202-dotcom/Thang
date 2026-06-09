@@ -303,6 +303,11 @@ export default function App() {
         setAdminModalError('Vui lòng nhập đủ tên đăng nhập và mật khẩu!'); 
         return; 
     }
+    const normalizedUsername = editingAppUser.username.trim().toLowerCase();
+    if (appUsersList.some(u => u.id !== editingAppUser.id && u.username?.trim().toLowerCase() === normalizedUsername)) {
+        setAdminModalError('Tên đăng nhập này đã tồn tại. Vui lòng sử dụng tên khác!');
+        return;
+    }
     setAdminModalError('');
     try {
         if (editingAppUser.id) {
@@ -318,18 +323,23 @@ export default function App() {
     }
   };
 
-  const handleDeleteAppUser = (id) => {
+  const handleDeleteAppUser = (account) => {
+    const duplicateAccounts = appUsersList.filter(u => u.username?.trim().toLowerCase() === account.username?.trim().toLowerCase());
     setConfirmAction({
         isOpen: true,
         title: 'Xóa Tài Khoản',
-        message: 'Bạn có chắc chắn muốn xóa tài khoản này không? Hành động này không thể hoàn tác.',
+        message: duplicateAccounts.length > 1
+          ? `Tài khoản "${account.username}" đang có ${duplicateAccounts.length} bản ghi trùng. Hệ thống sẽ xóa toàn bộ các bản ghi này.`
+          : `Bạn có chắc chắn muốn xóa tài khoản "${account.username}" không? Hành động này không thể hoàn tác.`,
         type: 'danger',
         onConfirm: async () => {
             try {
-                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'app_users', id));
-                setAppUsersList(current => current.filter(u => u.id !== id));
-                if (appUser?.id === id) setAppUser(null);
+                await Promise.all(duplicateAccounts.map(item => deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'app_users', item.id))));
+                const deletedIds = new Set(duplicateAccounts.map(item => item.id));
+                setAppUsersList(current => current.filter(u => !deletedIds.has(u.id)));
+                if (deletedIds.has(appUser?.id)) setAppUser(null);
                 setConfirmAction({ isOpen: false });
+                setNotification({ isOpen: true, message: `Đã xóa tài khoản "${account.username}"${duplicateAccounts.length > 1 ? ` và ${duplicateAccounts.length - 1} bản ghi trùng` : ''}.` });
             } catch (error) {
                 console.error('Lỗi xóa tài khoản:', error);
                 setConfirmAction({ isOpen: false });
@@ -2791,7 +2801,7 @@ Báo cáo được tạo tự động từ hệ thống.`;
                                        </td>
                                        <td className="p-4 text-right pr-6">
                                            <button onClick={() => { setEditingAppUser(u); setAdminModalError(''); setIsAppUserModalOpen(true); }} className="text-slate-400 hover:text-indigo-600 p-2 rounded transition-colors" title="Sửa"><Edit size={16} /></button>
-                                           <button onClick={() => handleDeleteAppUser(u.id)} className="text-slate-400 hover:text-rose-600 p-2 rounded transition-colors" title="Xóa"><Trash2 size={16} /></button>
+                                           <button onClick={() => handleDeleteAppUser(u)} className="text-slate-400 hover:text-rose-600 p-2 rounded transition-colors" title="Xóa"><Trash2 size={16} /></button>
                                        </td>
                                    </tr>
                                ))}
