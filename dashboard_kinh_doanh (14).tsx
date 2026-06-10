@@ -326,6 +326,36 @@ export default function App() {
     fetchAppUsers();
   }, [user, db]);
 
+  useEffect(() => {
+    if (!user || !db || new URLSearchParams(window.location.search).has('reportId')) return;
+    const fetchCustomGroups = async () => {
+      try {
+        const snapshot = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'custom_groups'));
+        const groups = [];
+        snapshot.forEach(groupDoc => groups.push({ ...groupDoc.data(), id: groupDoc.id }));
+        setCustomGroups(groups);
+      } catch (error) {
+        console.error('Lỗi tải nhóm theo dõi riêng:', error);
+      }
+    };
+    fetchCustomGroups();
+  }, [user, db]);
+
+  const saveCustomGroup = async group => {
+    const id = group.id || `CG${Date.now()}`;
+    const { id: ignoredId, actualDthu, actualDoanhSo, actualQty, memberList, productList, calculatedTarget, percent, ...groupData } = group;
+    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'custom_groups', id), groupData);
+    setCustomGroups(current => {
+      const exists = current.some(item => item.id === id);
+      return exists ? current.map(item => item.id === id ? { ...groupData, id } : item) : [...current, { ...groupData, id }];
+    });
+  };
+
+  const deleteCustomGroup = async id => {
+    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'custom_groups', id));
+    setCustomGroups(current => current.filter(group => group.id !== id));
+  };
+
   const handleLogin = (e) => {
     e.preventDefault();
     setLoginError('');
@@ -1416,17 +1446,17 @@ export default function App() {
             actualDthu: dthu,
             actualDoanhSo: doanhSo,
             actualQty: qty,
-            memberList: Object.values(membersData).sort((a,b) => b.doanhSo - a.doanhSo),
+            memberList: Object.values(membersData).sort((a,b) => b.dthu - a.dthu),
             productList: Object.values(productData).filter(p => p.target > 0 || p.doanhSo > 0 || p.dthu > 0).map(p => ({
                 ...p,
-                subItemsArray: p.subItems ? Object.entries(p.subItems).map(([name, vals]) => ({ name, ...vals })).sort((a,b) => b.doanhSo - a.doanhSo) : []
+                subItemsArray: p.subItems ? Object.entries(p.subItems).map(([name, vals]) => ({ name, ...vals })).sort((a,b) => b.dthu - a.dthu) : []
             })).sort((a,b) => {
                 if (a.name === 'Các sản phẩm còn lại') return 1;
                 if (b.name === 'Các sản phẩm còn lại') return -1;
                 return b.target - a.target;
             }), 
             calculatedTarget: calculatedTotalTarget,
-            percent: calculatedTotalTarget > 0 ? (doanhSo / calculatedTotalTarget) * 100 : 0
+            percent: calculatedTotalTarget > 0 ? (dthu / calculatedTotalTarget) * 100 : 0
         };
     });
   }, [customGroups, filteredActuals]);
@@ -2718,7 +2748,7 @@ Báo cáo được tạo tự động từ hệ thống.`;
                         )}
                      </div>
                   ) : (
-                     <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                     <div className="grid grid-cols-1 gap-6">
                         {customGroupStats.map((group, idx) => (
                            <div key={idx} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
                               <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-start">
@@ -2740,10 +2770,10 @@ Báo cáo được tạo tự động từ hệ thống.`;
                               <div className="p-5 flex-1 flex flex-col">
                                  <div className="flex justify-between items-end mb-2">
                                     <div>
-                                       <p className="text-xs font-semibold text-slate-500 mb-1">Tổng Thực tế đạt (Doanh số bán)</p>
+                                       <p className="text-xs font-semibold text-slate-500 mb-1">Tổng Thực tế đạt (Doanh thu chưa VAT)</p>
                                        <div className="flex items-baseline gap-2">
-                                           <p className="text-2xl font-bold text-emerald-600">{formatVND(group.actualDoanhSo)}</p>
-                                           <p className="text-xs text-slate-500 font-medium pb-1">SL: {group.actualQty || 0} | CVAT: {formatVND(group.actualDthu)}</p>
+                                           <p className="text-2xl font-bold text-emerald-600">{formatVND(group.actualDthu)}</p>
+                                           <p className="text-xs text-slate-500 font-medium pb-1">SL: {group.actualQty || 0}</p>
                                        </div>
                                     </div>
                                     {group.calculatedTarget > 0 && (
@@ -2775,7 +2805,7 @@ Báo cáo được tạo tự động từ hệ thống.`;
                                                     content={({ active, payload }) => {
                                                       if (active && payload && payload.length) {
                                                         const item = payload[0].payload;
-                                                        const percent = item.target > 0 ? ((item.doanhSo / item.target) * 100).toFixed(1) : 0;
+                                                        const percent = item.target > 0 ? ((item.dthu / item.target) * 100).toFixed(1) : 0;
                                                         return (
                                                           <div className="bg-white p-2 rounded shadow-md border border-slate-100 text-xs">
                                                             <p className="font-bold text-slate-700 mb-1">{item.name}</p>
@@ -2792,13 +2822,13 @@ Báo cáo được tạo tự động từ hệ thống.`;
                                                     }} 
                                                   />
                                                   <Bar dataKey="target" name="Mục tiêu" fill="#cbd5e1" radius={[2, 2, 0, 0]} maxBarSize={30} />
-                                                  <Bar dataKey="doanhSo" name="Thực tế (DS)" fill="#3b82f6" radius={[2, 2, 0, 0]} maxBarSize={30}>
+                                                  <Bar dataKey="dthu" name="Thực tế (DT chưa VAT)" fill="#3b82f6" radius={[2, 2, 0, 0]} maxBarSize={30}>
                                                      <LabelList 
-                                                        dataKey="doanhSo" 
+                                                        dataKey="dthu"
                                                         content={(props) => {
                                                            const { x, y, width, index } = props;
                                                            const target = group.productList[index].target;
-                                                           const val = group.productList[index].doanhSo;
+                                                           const val = group.productList[index].dthu;
                                                            if (!target || target === 0) return null;
                                                            const percent = ((val / target) * 100).toFixed(0);
                                                            return (
@@ -2834,12 +2864,12 @@ Báo cáo được tạo tự động từ hệ thống.`;
                                               <ResponsiveContainer width="100%" height="100%">
                                                 <PieChart>
                                                   <Pie 
-                                                    data={group.memberList.filter(m => m.doanhSo > 0 || m.dthu > 0)} 
+                                                    data={group.memberList.filter(m => m.dthu > 0)}
                                                     cx="50%" cy="50%" 
                                                     innerRadius={30} outerRadius={60} 
-                                                    paddingAngle={2} dataKey="doanhSo" nameKey="name"
+                                                    paddingAngle={2} dataKey="dthu" nameKey="name"
                                                   >
-                                                    {group.memberList.filter(m => m.doanhSo > 0 || m.dthu > 0).map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
+                                                    {group.memberList.filter(m => m.dthu > 0).map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
                                                   </Pie>
                                                   <Tooltip 
                                                     content={({ active, payload }) => {
@@ -2862,7 +2892,7 @@ Báo cáo được tạo tự động từ hệ thống.`;
 
                                         <div className="flex flex-col gap-3 max-h-[200px] overflow-y-auto custom-scrollbar pr-2">
                                            {group.memberList.map((m, midx) => {
-                                              const mPercent = group.actualDoanhSo > 0 ? ((m.doanhSo / group.actualDoanhSo) * 100).toFixed(1) : 0;
+                                              const mPercent = group.actualDthu > 0 ? ((m.dthu / group.actualDthu) * 100).toFixed(1) : 0;
                                               return (
                                                  <div key={midx} className="flex justify-between items-center text-sm border-b border-dashed border-slate-100 pb-2 last:border-0 last:pb-0">
                                                     <div className="flex items-center gap-2 overflow-hidden mr-2">
@@ -2873,7 +2903,7 @@ Báo cáo được tạo tự động từ hệ thống.`;
                                                        </div>
                                                     </div>
                                                     <div className="text-right shrink-0">
-                                                       <p className="font-bold text-slate-800">{formatVND(m.doanhSo)}</p>
+                                                       <p className="font-bold text-slate-800">{formatVND(m.dthu)}</p>
                                                        <p className="text-[10px] text-slate-500 font-medium">Chiếm {mPercent}% nhóm</p>
                                                     </div>
                                                  </div>
@@ -3916,10 +3946,15 @@ Báo cáo được tạo tự động từ hệ thống.`;
                               title: 'Xóa Nhóm',
                               message: `Bạn có chắc chắn muốn xóa nhóm "${editingGroup.name}"? Dữ liệu theo dõi của nhóm sẽ bị mất.`,
                               type: 'danger',
-                              onConfirm: () => {
-                                  setCustomGroups(customGroups.filter(g => g.id !== editingGroup.id)); 
-                                  setIsCustomGroupModalOpen(false); 
-                                  setConfirmAction({ isOpen: false });
+                              onConfirm: async () => {
+                                  try {
+                                    await deleteCustomGroup(editingGroup.id);
+                                    setIsCustomGroupModalOpen(false);
+                                    setConfirmAction({ isOpen: false });
+                                  } catch (error) {
+                                    console.error('Lỗi xóa nhóm theo dõi riêng:', error);
+                                    setNotification({ isOpen: true, message: 'Không thể xóa nhóm. Vui lòng kiểm tra kết nối Firebase.' });
+                                  }
                               },
                               hideCancel: false,
                               confirmText: 'Xác nhận'
@@ -3933,15 +3968,16 @@ Báo cáo được tạo tự động từ hệ thống.`;
                 <div className="flex gap-3">
                    <button onClick={() => setIsCustomGroupModalOpen(false)} className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-200 transition-colors">Hủy</button>
                    <button 
-                      onClick={() => {
+                      onClick={async () => {
                          if (!editingGroup.name.trim()) { setGroupModalError('Vui lòng nhập tên nhóm!'); return; }
                          setGroupModalError('');
-                         if (editingGroup.id) {
-                            setCustomGroups(customGroups.map(g => g.id === editingGroup.id ? editingGroup : g));
-                         } else {
-                            setCustomGroups([...customGroups, { ...editingGroup, id: 'CG' + Date.now() }]);
+                         try {
+                           await saveCustomGroup(editingGroup);
+                           setIsCustomGroupModalOpen(false);
+                         } catch (error) {
+                           console.error('Lỗi lưu nhóm theo dõi riêng:', error);
+                           setGroupModalError('Không thể lưu nhóm lên Firebase. Vui lòng thử lại.');
                          }
-                         setIsCustomGroupModalOpen(false);
                       }} 
                       className="px-5 py-2 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm flex items-center gap-2"
                    >
@@ -4467,7 +4503,7 @@ const PieTooltip = ({ active, payload, total }) => {
 
 function CustomGroupProductItem({ prod }) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const prodPercent = prod.target > 0 ? (prod.doanhSo / prod.target) * 100 : 0;
+  const prodPercent = prod.target > 0 ? (prod.dthu / prod.target) * 100 : 0;
   const isProdOverTarget = prodPercent >= 100;
   let prodBarColor = "bg-blue-500";
   if (isProdOverTarget) prodBarColor = "bg-emerald-500"; else if (prodPercent < 35) prodBarColor = "bg-amber-500";
@@ -4487,7 +4523,7 @@ function CustomGroupProductItem({ prod }) {
         <div className={`${prodBarColor} h-1.5 rounded-full transition-all`} style={{ width: `${Math.min(prodPercent, 100)}%` }}></div>
       </div>
       <div className="flex justify-between text-[10px] text-slate-500">
-        <span>DS: <span className="font-semibold text-slate-700">{formatVND(prod.doanhSo)}</span> <span className="ml-1 opacity-70">| SL: {prod.qty} | CVAT: {formatVND(prod.dthu)}</span></span>
+        <span>DT chưa VAT: <span className="font-semibold text-slate-700">{formatVND(prod.dthu)}</span> <span className="ml-1 opacity-70">| SL: {prod.qty}</span></span>
         <span>KH: {formatVND(prod.target)}</span>
       </div>
 
@@ -4495,7 +4531,7 @@ function CustomGroupProductItem({ prod }) {
         <div className="mt-1.5 pt-1.5 border-t border-slate-100 flex flex-col gap-1.5">
           <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Chi tiết các mặt hàng:</p>
           {prod.subItemsArray.map((sub, idx) => {
-            const percentOfTotal = prod.doanhSo > 0 ? ((sub.doanhSo / prod.doanhSo) * 100).toFixed(1) : 0;
+            const percentOfTotal = prod.dthu > 0 ? ((sub.dthu / prod.dthu) * 100).toFixed(1) : 0;
             return (
               <div key={idx} className="flex flex-col gap-0.5 text-[10px] pl-1 mb-1">
                 <div className="flex justify-between items-center">
@@ -4504,11 +4540,11 @@ function CustomGroupProductItem({ prod }) {
                       <span className="truncate">{sub.name}</span>
                     </span>
                     <span className="font-medium text-slate-700 shrink-0 text-right">
-                      {formatVND(sub.doanhSo)} 
+                      {formatVND(sub.dthu)}
                       <span className="text-indigo-500 font-semibold ml-1">({percentOfTotal}%)</span>
                     </span>
                 </div>
-                <div className="text-[9px] text-slate-400 pl-2.5">SL: {sub.qty} | CVAT: {formatVND(sub.dthu)}</div>
+                  <div className="text-[9px] text-slate-400 pl-2.5">SL: {sub.qty}</div>
               </div>
             );
           })}
