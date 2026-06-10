@@ -124,6 +124,9 @@ export default function App() {
   
   const [chartGranularity, setChartGranularity] = useState('month'); 
   const [financeMetric, setFinanceMetric] = useState('dthuChuaVat'); 
+  const [activeFinanceTab, setActiveFinanceTab] = useState('overview');
+  const [edraPeriodFilter, setEdraPeriodFilter] = useState('All');
+  const [edraSearch, setEdraSearch] = useState('');
   const [reportFilters, setReportFilters] = useState({
     finance: { teams: [], period: 'All' },
     teamFinance: { teams: [], period: 'All' },
@@ -157,6 +160,10 @@ export default function App() {
 
   const [rawPlans, setRawPlans] = useState(generateMockPlans());
   const [rawActuals, setRawActuals] = useState([]);
+  const [customerPeriodFilter, setCustomerPeriodFilter] = useState('All');
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [customerFilters, setCustomerFilters] = useState([]);
+  const [customerProductFilters, setCustomerProductFilters] = useState([]);
 
   const actualFileInputRef = useRef(null);
   const planFileInputRef = useRef(null);
@@ -327,6 +334,7 @@ export default function App() {
         setAppUser(found);
         if (found.role === 'admin' || found.permissions.includes('tab_finance')) setActiveTab('finance');
         else if (found.permissions.includes('tab_inventory')) setActiveTab('inventory');
+        else if (found.permissions.includes('tab_customer')) setActiveTab('customer');
         else if (found.permissions.includes('tab_team')) { setActiveTab('team'); setActiveTeamTab(found.permissions.includes('sub_finance') ? 'finance_team' : found.permissions.includes('sub_sales') ? 'sales_programs' : found.permissions.includes('sub_overview') ? 'task_overview' : 'task_management'); }
         else if (found.permissions.includes('tab_custom')) setActiveTab('custom');
         else setActiveTab('none');
@@ -672,12 +680,19 @@ export default function App() {
           if (isTotalRow) return;
 
           let doanhSo = 0, dthuChuaVAT = 0, teamRaw = '', empRaw = '', spRaw = '', dateRaw = '';
+          let customerNameRaw = '', customerCodeRaw = '', productCodeRaw = '', productNameRaw = '', qtySold = 0, qtyReturned = 0;
           for (const key in row) {
               const k = key.toUpperCase();
               if (k.includes('DTHU CHƯA VAT') || k.includes('DOANH THU CHƯA VAT')) dthuChuaVAT = parseNum(row[key]);
               else if (k.includes('DOANH SỐ BÁN') || k.includes('DOANH SO BAN')) doanhSo = parseNum(row[key]);
               else if (k.includes('TRƯỞNG NHÓM')) teamRaw = row[key];
               else if (k.includes('TÊN NHÂN VIÊN') || k.includes('NHÂN VIÊN')) empRaw = row[key];
+              else if (k.includes('TÊN KHÁCH HÀNG') || k.includes('TEN KHACH HANG') || k === 'KHÁCH HÀNG') customerNameRaw = row[key];
+              else if (k.includes('MÃ KHÁCH HÀNG') || k.includes('MA KHACH HANG') || k.includes('MÃ KH')) customerCodeRaw = row[key];
+              else if (k === 'MÃ HÀNG' || k === 'MA HANG') productCodeRaw = row[key];
+              else if (k === 'TÊN HÀNG' || k === 'TEN HANG') productNameRaw = row[key];
+              else if (k.includes('SỐ LƯỢNG TRẢ') || k.includes('SO LUONG TRA') || k.includes('SL TRẢ') || k.includes('SL TRA')) qtyReturned = parseNum(row[key]);
+              else if (k.includes('TỔNG SỐ LƯỢNG BÁN') || k.includes('SỐ LƯỢNG BÁN') || k.includes('SO LUONG BAN') || k.includes('SL BÁN') || k.includes('SL BAN')) qtySold = parseNum(row[key]);
               else if (k.includes('NHÓM SẢN PHẨM') || k.includes('MẶT HÀNG') || k.includes('SẢN PHẨM')) spRaw = row[key];
               else if (k.includes('NGÀY HẠCH TOÁN') || k.includes('NGÀY CHỨNG TỪ')) dateRaw = row[key];
           }
@@ -729,7 +744,11 @@ export default function App() {
           parsedActuals.push({
             date: stdDate, month: currentActualMonth, quarter: `Quý ${quarterVal}`, team: currentActualTeam,
             employee: currentEmp, productGroup: sp, subProductGroup: subSp, revenueActual: dthuChuaVAT, 
-            doanhSoBan: doanhSo, qtyActual: parseNum(row['Tổng số lượng bán'])
+            doanhSoBan: doanhSo, qtyActual: qtySold, qtyReturned,
+            customerName: String(customerNameRaw || 'Chưa xác định').trim(),
+            customerCode: String(customerCodeRaw || '').trim(),
+            productCode: String(productCodeRaw || '').trim(),
+            productName: String(productNameRaw || subSp || 'Khác').trim()
           });
         });
         setRawActuals(parsedActuals);
@@ -1547,6 +1566,106 @@ export default function App() {
       normalizeSearchText(item.tenHang).includes(q);
   }), [rawDetailedInventory, invDetailBrandFilters, invDetailSearch]);
 
+  const customerFilterOptions = useMemo(() => Array.from(new Map(rawActuals.map(item => {
+    const name = String(item.customerName || 'Chưa xác định').trim() || 'Chưa xác định';
+    const code = String(item.customerCode || '').trim();
+    return [`${code}|${name}`, { value: `${code}|${name}`, label: code ? `${code} - ${name}` : name }];
+  })).values()).sort((a, b) => a.label.localeCompare(b.label, 'vi')), [rawActuals]);
+  const customerProductOptions = useMemo(() => Array.from(new Map(rawActuals.map(item => {
+    const code = String(item.productCode || '').trim();
+    const name = String(item.productName || item.subProductGroup || item.productGroup || 'Khác').trim();
+    return [`${code}|${name}`, { value: `${code}|${name}`, label: code ? `${code} - ${name}` : name }];
+  })).values()).sort((a, b) => a.label.localeCompare(b.label, 'vi')), [rawActuals]);
+
+  const customerAnalysis = useMemo(() => {
+    const query = normalizeSearchText(customerSearch);
+    const filtered = rawActuals.filter(item => {
+      if (!matchesPeriod(item.month, customerPeriodFilter)) return false;
+      const name = String(item.customerName || 'Chưa xác định').trim() || 'Chưa xác định';
+      const code = String(item.customerCode || '').trim();
+      const customerKey = `${code}|${name}`;
+      const productCode = String(item.productCode || '').trim();
+      const product = String(item.productName || item.subProductGroup || item.productGroup || 'Khác').trim();
+      const productKey = `${productCode}|${product}`;
+      if (customerFilters.length > 0 && !customerFilters.includes(customerKey)) return false;
+      if (customerProductFilters.length > 0 && !customerProductFilters.includes(productKey)) return false;
+      if (query && !normalizeSearchText(`${code} ${name} ${productCode} ${product}`).includes(query)) return false;
+      return true;
+    });
+
+    const customerMap = {};
+    const productMap = {};
+    filtered.forEach(item => {
+      const name = String(item.customerName || 'Chưa xác định').trim() || 'Chưa xác định';
+      const code = String(item.customerCode || '').trim();
+      const key = `${code}|${name}`;
+      const productCode = String(item.productCode || '').trim();
+      const product = String(item.productName || item.subProductGroup || item.productGroup || 'Khác').trim();
+      const productKey = `${productCode}|${product}`;
+      if (!customerMap[key]) customerMap[key] = { key, code, name, revenue: 0, sold: 0, returned: 0 };
+      if (!productMap[productKey]) productMap[productKey] = { key: productKey, code: productCode, name: product, revenue: 0, sold: 0, returned: 0 };
+      customerMap[key].revenue += item.revenueActual || 0;
+      customerMap[key].sold += item.qtyActual || 0;
+      customerMap[key].returned += item.qtyReturned || 0;
+      productMap[productKey].revenue += item.revenueActual || 0;
+      productMap[productKey].sold += item.qtyActual || 0;
+      productMap[productKey].returned += item.qtyReturned || 0;
+    });
+    const customers = Object.values(customerMap).sort((a, b) => b.revenue - a.revenue);
+    const products = Object.values(productMap).sort((a, b) => b.revenue - a.revenue);
+    return {
+      customers, products,
+      revenue: filtered.reduce((sum, item) => sum + (item.revenueActual || 0), 0),
+      sold: filtered.reduce((sum, item) => sum + (item.qtyActual || 0), 0),
+      returned: filtered.reduce((sum, item) => sum + (item.qtyReturned || 0), 0),
+      customerCount: customers.length
+    };
+  }, [rawActuals, customerPeriodFilter, customerSearch, customerFilters, customerProductFilters]);
+
+  const edraAnalysis = useMemo(() => {
+    const allowedGroups = ['Chuột', 'Bàn phím', 'Tai nghe', 'Màn hình', 'Ghế', 'Case', 'Nguồn', 'Phụ Kiện'];
+    const query = normalizeSearchText(edraSearch);
+    const periodActuals = rawActuals.filter(item => matchesPeriod(item.month, edraPeriodFilter));
+    const categoryTotals = {};
+    periodActuals.forEach(item => {
+      const category = classifyProductGroup(item.productGroup || item.subProductGroup || item.productName);
+      categoryTotals[category] = (categoryTotals[category] || 0) + (item.revenueActual || 0);
+    });
+
+    const productMap = {};
+    periodActuals.forEach(item => {
+      const productName = String(item.productName || '');
+      const productCode = String(item.productCode || '');
+      const isEdra = /(^|[^a-z])e[\s-]?dra([^a-z]|$)/i.test(productName);
+      const category = classifyProductGroup(item.productGroup || item.subProductGroup || productName);
+      if (!isEdra || !allowedGroups.includes(category)) return;
+      if (query && !normalizeSearchText(`${productCode} ${productName} ${category}`).includes(query)) return;
+      const key = `${productCode}|${productName}`;
+      if (!productMap[key]) productMap[key] = { key, code: productCode, name: productName, category, revenue: 0, qty: 0 };
+      productMap[key].revenue += item.revenueActual || 0;
+      productMap[key].qty += item.qtyActual || 0;
+    });
+
+    const products = Object.values(productMap).sort((a, b) => b.revenue - a.revenue);
+    const categoryMap = {};
+    products.forEach(item => {
+      if (!categoryMap[item.category]) categoryMap[item.category] = { name: item.category, revenue: 0, qty: 0, totalGroupRevenue: categoryTotals[item.category] || 0 };
+      categoryMap[item.category].revenue += item.revenue;
+      categoryMap[item.category].qty += item.qty;
+    });
+    const categories = allowedGroups.map(name => {
+      const item = categoryMap[name] || { name, revenue: 0, qty: 0, totalGroupRevenue: categoryTotals[name] || 0 };
+      return { ...item, share: item.totalGroupRevenue > 0 ? (item.revenue / item.totalGroupRevenue) * 100 : 0 };
+    });
+    return {
+      products,
+      categories,
+      revenue: products.reduce((sum, item) => sum + item.revenue, 0),
+      qty: products.reduce((sum, item) => sum + item.qty, 0),
+      productCount: products.length
+    };
+  }, [rawActuals, edraPeriodFilter, edraSearch]);
+
   const filteredTasks = useMemo(() => {
     return tasks.filter(t => {
       const matchStartDate = !taskFilters.startDate || t.startDate >= taskFilters.startDate;
@@ -1801,6 +1920,11 @@ Báo cáo được tạo tự động từ hệ thống.`;
                    <Archive size={20} className={activeTab === 'inventory' ? 'text-indigo-200' : 'text-slate-500'} /> <span className="font-medium">Quản trị tồn kho</span>
                 </button>
             )}
+            {hasAccess('tab_customer') && (
+                <button onClick={() => setActiveTab('customer')} className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all whitespace-nowrap ${activeTab === 'customer' ? 'bg-indigo-600 text-white shadow-md' : 'hover:bg-slate-800 hover:text-white'}`}>
+                   <User size={20} className={activeTab === 'customer' ? 'text-indigo-200' : 'text-slate-500'} /> <span className="font-medium">Theo dõi khách hàng</span>
+                </button>
+            )}
             {hasAccess('tab_team') && (
                 <button onClick={() => {setActiveTab('team'); setActiveTeamTab(hasAccess('sub_finance') ? 'finance_team' : hasAccess('sub_sales') ? 'sales_programs' : hasAccess('sub_overview') ? 'task_overview' : 'task_management')}} className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all whitespace-nowrap ${activeTab === 'team' ? 'bg-indigo-600 text-white shadow-md' : 'hover:bg-slate-800 hover:text-white'}`}>
                    <Users size={20} className={activeTab === 'team' ? 'text-indigo-200' : 'text-slate-500'} /> <span className="font-medium">Quản trị đội nhóm</span>
@@ -1837,11 +1961,11 @@ Báo cáo được tạo tự động từ hệ thống.`;
             <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center mb-6 gap-4">
               <div>
                 <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-                  {activeTab === 'finance' ? 'Phân tích Kết quả Kinh doanh' : (activeTab === 'inventory' ? 'Quản Trị Tồn Kho' : activeTab === 'admin' ? 'Quản Trị Hệ Thống' : 'Quản trị Đội nhóm & Công việc')}
+                  {activeTab === 'finance' ? 'Phân tích Kết quả Kinh doanh' : (activeTab === 'inventory' ? 'Quản Trị Tồn Kho' : activeTab === 'customer' ? 'Theo dõi Khách hàng' : activeTab === 'admin' ? 'Quản Trị Hệ Thống' : 'Quản trị Đội nhóm & Công việc')}
                   {isProcessing && <Loader2 className="animate-spin text-blue-500" size={20} />}
                 </h1>
                 <p className="text-slate-500 text-sm mt-1 flex items-center gap-2">
-                  {activeTab === 'finance' ? 'Theo dõi % hoàn thành mục tiêu đa chiều' : (activeTab === 'inventory' ? 'Kiểm soát hàng hóa tồn kho theo khu vực và thương hiệu' : activeTab === 'admin' ? 'Cấp quyền và quản lý tài khoản người dùng' : 'Thống kê tài chính team và quản lý tiến độ dự án')}
+                  {activeTab === 'finance' ? 'Theo dõi % hoàn thành mục tiêu đa chiều' : (activeTab === 'inventory' ? 'Kiểm soát hàng hóa tồn kho theo khu vực và thương hiệu' : activeTab === 'customer' ? 'Phân tích doanh thu, số lượng bán và trả lại theo khách hàng' : activeTab === 'admin' ? 'Cấp quyền và quản lý tài khoản người dùng' : 'Thống kê tài chính team và quản lý tiến độ dự án')}
                   {isViewOnly && <span className="bg-amber-100 text-amber-700 text-xs px-2.5 py-0.5 rounded-full font-bold ml-2">👁️ Khách</span>}
                 </p>
               </div>
@@ -1901,8 +2025,19 @@ Báo cáo được tạo tự động từ hệ thống.`;
               </div>
             </div>
 
+            {activeTab === 'finance' && (
+              <div className="flex gap-2 mb-6 border-b border-slate-200 pb-3">
+                <button onClick={() => setActiveFinanceTab('overview')} className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-colors ${activeFinanceTab === 'overview' ? 'bg-indigo-100 text-indigo-700' : 'text-slate-500 hover:bg-slate-100'}`}>
+                  <PieChartIcon size={18}/> Tổng quan
+                </button>
+                <button onClick={() => setActiveFinanceTab('edra')} className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-colors ${activeFinanceTab === 'edra' ? 'bg-rose-100 text-rose-700' : 'text-slate-500 hover:bg-slate-100'}`}>
+                  <Target size={18}/> EDRA
+                </button>
+              </div>
+            )}
+
             {/* FILTERS */}
-            {(activeTab === 'finance' || activeTab === 'custom' || (activeTab === 'team' && activeTeamTab === 'finance_team')) && (
+            {((activeTab === 'finance' && activeFinanceTab === 'overview') || activeTab === 'custom' || (activeTab === 'team' && activeTeamTab === 'finance_team')) && (
                 <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 mb-6 flex flex-wrap gap-4 items-center justify-between">
                   <div className="flex items-center gap-4 flex-wrap w-full">
                     <div className="flex items-center gap-2 text-slate-500 font-medium min-w-fit"><Filter size={18} /> Lọc Báo Cáo:</div>
@@ -1973,14 +2108,14 @@ Báo cáo được tạo tự động từ hệ thống.`;
                 </div>
             )}
 
-            {activeTab === 'finance' && (
+            {activeTab === 'finance' && activeFinanceTab === 'overview' && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
                 <DatasetNotePanel type="actuals" title="Ghi chú dữ liệu Thực tế" meta={datasetMeta} drafts={datasetNoteDrafts} setDrafts={setDatasetNoteDrafts} onSave={saveDatasetNote} canEdit={!isViewOnly && hasAccess('action_upload_finance')} />
                 <DatasetNotePanel type="plans" title="Ghi chú dữ liệu Kế hoạch" meta={datasetMeta} drafts={datasetNoteDrafts} setDrafts={setDatasetNoteDrafts} onSave={saveDatasetNote} canEdit={!isViewOnly && hasAccess('action_upload_finance')} />
               </div>
             )}
 
-            {activeTab === 'finance' && (
+            {activeTab === 'finance' && activeFinanceTab === 'overview' && (
                <div className="animate-in fade-in duration-300">
                   
                   {/* KPI CARDS */}
@@ -3141,6 +3276,188 @@ Báo cáo được tạo tự động từ hệ thống.`;
                </div>
             )}
 
+            {activeTab === 'finance' && activeFinanceTab === 'edra' && (
+              <div className="animate-in fade-in duration-300">
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 mb-6 flex flex-wrap gap-4 items-end">
+                  <div className="flex-1 min-w-[260px]">
+                    <p className="text-xs font-semibold text-slate-500 mb-1">Tìm kiếm sản phẩm EDRA / E-DRA</p>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
+                      <input value={edraSearch} onChange={event => setEdraSearch(event.target.value)} placeholder="Nhập mã hàng, tên hàng hoặc nhóm hàng..." className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2.5 pl-10 pr-4 text-sm outline-none focus:ring-2 focus:ring-rose-500"/>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-slate-500 mb-1">Thời gian</p>
+                    <select value={edraPeriodFilter} onChange={event => setEdraPeriodFilter(event.target.value)} className="bg-rose-50 border border-rose-200 rounded-lg p-2.5 text-sm font-semibold text-rose-800 outline-none w-52">
+                      {periodOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                  <KPICard title="Doanh thu EDRA chưa VAT" value={formatVND(edraAnalysis.revenue)} icon={<DollarSign className="text-rose-600" size={24}/>}/>
+                  <KPICard title="Số lượng EDRA đã bán" value={edraAnalysis.qty.toLocaleString()} icon={<Package className="text-indigo-600" size={24}/>}/>
+                  <KPICard title="Số mã hàng EDRA" value={edraAnalysis.productCount.toLocaleString()} icon={<Database className="text-amber-600" size={24}/>}/>
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
+                  <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                    <h3 className="font-bold text-slate-800 mb-4">Doanh thu EDRA theo nhóm hàng</h3>
+                    <div className="h-[360px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={edraAnalysis.categories} margin={{ left: 10, right: 15, bottom: 20 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false}/>
+                          <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-15} textAnchor="end" height={55}/>
+                          <YAxis tickFormatter={value => `${Math.round(value / 1000000)} tr`}/>
+                          <Tooltip formatter={value => formatVND(value)}/>
+                          <Bar dataKey="revenue" name="Doanh thu EDRA" fill="#e11d48" radius={[4, 4, 0, 0]}>
+                            <LabelList dataKey="revenue" position="top" formatter={value => value > 0 ? `${Math.round(value / 1000000)}tr` : ''} style={{ fontSize: 9, fill: '#64748b', fontWeight: 700 }}/>
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                  <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                    <h3 className="font-bold text-slate-800 mb-4">Số lượng bán EDRA theo nhóm hàng</h3>
+                    <div className="h-[360px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={edraAnalysis.categories} layout="vertical" margin={{ left: 25, right: 35 }}>
+                          <CartesianGrid strokeDasharray="3 3" horizontal={false}/>
+                          <XAxis type="number"/>
+                          <YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 11, fontWeight: 600 }}/>
+                          <Tooltip formatter={value => value.toLocaleString()}/>
+                          <Bar dataKey="qty" name="Số lượng bán" fill="#4f46e5" radius={[0, 4, 4, 0]}>
+                            <LabelList dataKey="qty" position="right" style={{ fontSize: 10, fill: '#475569', fontWeight: 700 }}/>
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
+                  <div className="p-4 border-b border-slate-200 bg-slate-50">
+                    <h3 className="font-bold text-slate-800">Tỷ trọng doanh thu EDRA trong từng nhóm hàng</h3>
+                    <p className="text-xs text-slate-500 mt-1">So sánh doanh thu EDRA/E-DRA với tổng doanh thu của nhóm hàng tương ứng.</p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[760px] text-sm">
+                      <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="p-3 text-left">Nhóm hàng</th><th className="p-3 text-right">DT EDRA</th><th className="p-3 text-right">Tổng DT nhóm</th><th className="p-3 text-right">Tỷ trọng EDRA</th><th className="p-3 text-right">SL bán EDRA</th></tr></thead>
+                      <tbody>{edraAnalysis.categories.map(item => (
+                        <tr key={item.name} className="border-t border-slate-100 hover:bg-slate-50">
+                          <td className="p-3 font-bold text-slate-700">{item.name}</td>
+                          <td className="p-3 text-right font-bold text-rose-700">{formatVND(item.revenue)}</td>
+                          <td className="p-3 text-right text-slate-600">{formatVND(item.totalGroupRevenue)}</td>
+                          <td className="p-3 text-right"><span className="bg-rose-50 text-rose-700 font-bold px-2.5 py-1 rounded-lg">{item.share.toFixed(1)}%</span></td>
+                          <td className="p-3 text-right font-semibold">{item.qty.toLocaleString()}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                  <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between"><h3 className="font-bold text-slate-800">Chi tiết sản phẩm EDRA</h3><span className="text-xs bg-rose-100 text-rose-700 font-bold px-3 py-1 rounded-full">{edraAnalysis.products.length} mã hàng</span></div>
+                  <div className="overflow-x-auto max-h-[600px]"><table className="w-full min-w-[900px] text-sm">
+                    <thead className="sticky top-0 bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="p-3 text-left">Mã hàng</th><th className="p-3 text-left">Tên hàng</th><th className="p-3 text-left">Nhóm hàng</th><th className="p-3 text-right">SL bán</th><th className="p-3 text-right">DT chưa VAT</th></tr></thead>
+                    <tbody>{edraAnalysis.products.map(item => <tr key={item.key} className="border-t border-slate-100 hover:bg-slate-50"><td className="p-3 font-mono font-semibold">{item.code || '-'}</td><td className="p-3 font-medium text-slate-700">{item.name}</td><td className="p-3">{item.category}</td><td className="p-3 text-right font-semibold">{item.qty.toLocaleString()}</td><td className="p-3 text-right font-bold text-rose-700">{formatVND(item.revenue)}</td></tr>)}
+                    {edraAnalysis.products.length === 0 && <tr><td colSpan="5" className="p-10 text-center text-slate-500 italic">Chưa có dữ liệu EDRA. Vui lòng upload lại file thực tế có cột Tên hàng.</td></tr>}</tbody>
+                  </table></div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'customer' && (
+              <div className="animate-in fade-in duration-300">
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 mb-6 flex flex-wrap gap-4 items-end">
+                  <div className="flex-1 min-w-[240px]">
+                    <p className="text-xs font-semibold text-slate-500 mb-1">Tìm kiếm khách hàng hoặc mặt hàng</p>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
+                      <input value={customerSearch} onChange={event => setCustomerSearch(event.target.value)} placeholder="Nhập tên, mã khách hàng hoặc mặt hàng..." className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2.5 pl-10 pr-4 text-sm outline-none focus:ring-2 focus:ring-indigo-500"/>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-slate-500 mb-1">Thời gian</p>
+                    <select value={customerPeriodFilter} onChange={event => setCustomerPeriodFilter(event.target.value)} className="bg-amber-50 border border-amber-200 rounded-lg p-2.5 text-sm font-semibold text-amber-800 outline-none w-48">
+                      {periodOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                  </div>
+                  <MultiSelectFilter label="Khách hàng" options={customerFilterOptions} selected={customerFilters} setSelected={setCustomerFilters}/>
+                  <MultiSelectFilter label="Mặt hàng" options={customerProductOptions} selected={customerProductFilters} setSelected={setCustomerProductFilters}/>
+                </div>
+
+                <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+                  <KPICard title="Doanh thu chưa VAT" value={formatVND(customerAnalysis.revenue)} icon={<DollarSign className="text-emerald-600" size={24}/>}/>
+                  <KPICard title="Số lượng bán" value={formatVND(customerAnalysis.sold)} icon={<Package className="text-blue-600" size={24}/>}/>
+                  <KPICard title="Số lượng trả lại" value={formatVND(customerAnalysis.returned)} icon={<Archive className="text-rose-600" size={24}/>} valueColor="text-rose-600"/>
+                  <KPICard title="Số khách hàng" value={customerAnalysis.customerCount.toLocaleString()} icon={<Users className="text-purple-600" size={24}/>}/>
+                </div>
+
+                <div className="flex flex-col gap-6 mb-6">
+                  <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                    <h3 className="font-bold text-slate-800 mb-4">Top khách hàng theo doanh thu</h3>
+                    <div className="h-[460px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={customerAnalysis.customers.slice(0, 15)} layout="vertical" margin={{ left: 30, right: 45, top: 5, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" horizontal={false}/>
+                          <XAxis type="number" tickFormatter={value => value >= 1000000000 ? `${(value / 1000000000).toFixed(1)} tỷ` : `${Math.round(value / 1000000)} tr`}/>
+                          <YAxis type="category" dataKey="name" width={300} tick={{ fontSize: 12, fill: '#334155', fontWeight: 600 }}/>
+                          <Tooltip formatter={value => formatVND(value)} labelFormatter={(_, payload) => payload?.[0]?.payload?.code ? `${payload[0].payload.code} - ${payload[0].payload.name}` : payload?.[0]?.payload?.name}/>
+                          <Bar dataKey="revenue" name="Doanh thu chưa VAT" fill="#4f46e5" radius={[0, 4, 4, 0]} maxBarSize={24}>
+                            <LabelList dataKey="revenue" position="right" formatter={value => value >= 1000000000 ? `${(value / 1000000000).toFixed(1)} tỷ` : `${Math.round(value / 1000000)} tr`} style={{ fontSize: 11, fill: '#475569', fontWeight: 700 }}/>
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                  <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                    <h3 className="font-bold text-slate-800 mb-1">Số lượng bán và trả lại theo mã hàng</h3>
+                    <p className="text-xs text-slate-500 mb-4">Hiển thị theo mã hàng để dễ đọc; di chuột để xem tên hàng đầy đủ.</p>
+                    <div className="h-[420px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={customerAnalysis.products.slice(0, 20)} margin={{ bottom: 45, left: 10, right: 20 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false}/>
+                          <XAxis dataKey="code" angle={-20} textAnchor="end" height={70} tick={{ fontSize: 10, fill: '#475569', fontWeight: 600 }}/>
+                          <YAxis/>
+                          <Tooltip labelFormatter={(_, payload) => payload?.[0]?.payload ? `${payload[0].payload.code || '-'} - ${payload[0].payload.name}` : ''} formatter={(value, name) => [value.toLocaleString(), name]}/>
+                          <Legend/>
+                          <Bar dataKey="sold" name="Số lượng bán" fill="#10b981" radius={[4, 4, 0, 0]}/>
+                          <Bar dataKey="returned" name="Số lượng trả lại" fill="#f43f5e" radius={[4, 4, 0, 0]}/>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                  <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+                    <h3 className="font-bold text-slate-800">Chi tiết theo khách hàng</h3>
+                    <span className="text-xs bg-indigo-100 text-indigo-700 font-bold px-3 py-1 rounded-full">{customerAnalysis.customers.length} khách hàng</span>
+                  </div>
+                  <div className="overflow-x-auto max-h-[600px]">
+                    <table className="w-full min-w-[760px] text-sm">
+                      <thead className="sticky top-0 bg-slate-50 text-xs uppercase text-slate-500">
+                        <tr><th className="p-3 text-left">Mã KH</th><th className="p-3 text-left">Tên khách hàng</th><th className="p-3 text-right">DT chưa VAT</th><th className="p-3 text-right">SL bán</th><th className="p-3 text-right">SL trả lại</th></tr>
+                      </thead>
+                      <tbody>
+                        {customerAnalysis.customers.map(customer => (
+                          <tr key={customer.key} className="border-t border-slate-100 hover:bg-slate-50">
+                            <td className="p-3 font-mono text-slate-500">{customer.code || '-'}</td>
+                            <td className="p-3 font-semibold text-slate-700">{customer.name}</td>
+                            <td className="p-3 text-right font-bold text-emerald-700">{formatVND(customer.revenue)}</td>
+                            <td className="p-3 text-right font-semibold">{customer.sold.toLocaleString()}</td>
+                            <td className="p-3 text-right font-semibold text-rose-600">{customer.returned.toLocaleString()}</td>
+                          </tr>
+                        ))}
+                        {customerAnalysis.customers.length === 0 && <tr><td colSpan="5" className="p-10 text-center text-slate-500 italic">Chưa có dữ liệu khách hàng. Vui lòng upload lại file thực tế có cột khách hàng.</td></tr>}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {activeTab === 'admin' && appUser?.role === 'admin' && (
                <div className="animate-in fade-in duration-300">
                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
@@ -3260,6 +3577,7 @@ Báo cáo được tạo tự động từ hệ thống.`;
                                       {[
                                           { id: 'tab_finance', label: '📊 Phân tích Tài chính', isSub: false },
                                           { id: 'tab_inventory', label: '📦 Quản trị Tồn kho', isSub: false },
+                                          { id: 'tab_customer', label: '👤 Theo dõi Khách hàng', isSub: false },
                                           { id: 'tab_team', label: '👥 Quản trị Đội nhóm & Dự án', isSub: false },
                                           { id: 'sub_finance', label: '↳ Tài chính nhóm', isSub: true, parent: 'tab_team' },
                                           { id: 'sub_sales', label: '↳ Chương trình bán hàng', isSub: true, parent: 'tab_team' },
@@ -3833,6 +4151,33 @@ function TeamFinanceCard({ team, isViewOnly }) {
          )}
       </div>
    );
+}
+
+function MultiSelectFilter({ label, options, selected, setSelected }) {
+  const [isOpen, setIsOpen] = useState(false);
+  return (
+    <div>
+      <p className="text-xs font-semibold text-slate-500 mb-1">{label}</p>
+      <div className="relative w-56">
+        <button type="button" onClick={() => setIsOpen(open => !open)} className="w-full bg-blue-50 border border-blue-200 rounded-lg p-2.5 text-sm font-semibold text-blue-800 flex items-center justify-between gap-2">
+          <span className="truncate">{selected.length === 0 ? `Tất cả ${label.toLowerCase()}` : `${selected.length} mục đã chọn`}</span><ChevronDown size={16}/>
+        </button>
+        {isOpen && (
+          <div className="absolute right-0 top-full mt-2 z-50 w-80 max-w-[90vw] max-h-80 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-xl p-2">
+            <button type="button" onClick={() => setSelected([])} className="w-full flex items-center gap-2 p-2 rounded-lg text-sm hover:bg-blue-50">
+              {selected.length === 0 ? <CheckSquare size={16} className="text-blue-600"/> : <Square size={16}/>} Tất cả
+            </button>
+            {options.map(option => (
+              <button type="button" key={option.value} onClick={() => setSelected(current => current.includes(option.value) ? current.filter(value => value !== option.value) : [...current, option.value])} className="w-full flex items-start gap-2 p-2 rounded-lg text-left text-sm hover:bg-blue-50">
+                {selected.includes(option.value) ? <CheckSquare size={16} className="text-blue-600 shrink-0 mt-0.5"/> : <Square size={16} className="shrink-0 mt-0.5"/>}<span>{option.label}</span>
+              </button>
+            ))}
+            <button type="button" onClick={() => setIsOpen(false)} className="sticky bottom-0 mt-2 w-full bg-blue-600 text-white rounded-lg py-2 text-sm font-semibold">Áp dụng</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function DatasetNotePanel({ type, title, meta, drafts, setDrafts, onSave, canEdit }) {
